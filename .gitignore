@@ -1,0 +1,12 @@
+.DS_Store
+
+# SwiftPM build output
+.build/
+.swiftpm/
+
+# Local sandbox/cache directories used during development
+.cache/
+.home/
+
+# Local user config
+config.json

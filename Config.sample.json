@@ -1,0 +1,45 @@
+{
+  "shortcuts": [
+    {
+      "id": "bundle-and-title-regex",
+      "hotkey": "cmd+option+1",
+      "bundleId": "com.microsoft.VSCode",
+      "titleRegex": "^project-a.*"
+    },
+    {
+      "id": "bundle-and-title-contains",
+      "hotkey": "cmd+option+2",
+      "bundleId": "com.todesktop.230313mzl4w4u92",
+      "titleContains": "snippets"
+    },
+    {
+      "id": "bundle-and-document-regex",
+      "hotkey": "cmd+option+3",
+      "bundleId": "com.todesktop.230313mzl4w4u92",
+      "documentRegex": "/Users/example/src/sql/"
+    },
+    {
+      "id": "bundle-and-url-regex",
+      "hotkey": "cmd+option+4",
+      "bundleId": "com.apple.Safari",
+      "urlRegex": "github\\.com/.*/pull/"
+    },
+    {
+      "id": "bundle-and-identifier-regex",
+      "hotkey": "cmd+option+5",
+      "bundleId": "com.apple.finder",
+      "identifierRegex": "FinderWindow"
+    },
+    {
+      "id": "app-name-and-window-index",
+      "hotkey": "cmd+option+6",
+      "appNameRegex": "^Firefox$",
+      "windowIndex": 1
+    },
+    {
+      "id": "portable-install-by-executable-path",
+      "hotkey": "cmd+option+7",
+      "executablePathRegex": "^/Users/example/Apps/PortableCode/Visual Studio Code\\.app/"
+    }
+  ]
+}
