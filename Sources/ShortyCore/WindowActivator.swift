@@ -52,7 +52,7 @@ public final class WindowActivator {
         guard matches.indices.contains(shortcut.matcher.windowIndex) else {
             let message = matches.isEmpty
                 ? "No window matched `\(shortcut.id)`."
-                : "Shortcut `\(shortcut.id)` matched \(matches.count) window(s), but windowIndex \(shortcut.matcher.windowIndex) is out of range."
+                : "Shortcut `\(shortcut.id)` matched \(matches.count) window(s), but window-index \(shortcut.matcher.windowIndex) is out of range."
             console.error(message)
             return ActivationResult(succeeded: false, message: message)
         }

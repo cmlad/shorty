@@ -16,9 +16,15 @@ let package = Package(
             targets: ["Shorty"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.1"),
+    ],
     targets: [
         .target(
-            name: "ShortyCore"
+            name: "ShortyCore",
+            dependencies: [
+                .product(name: "Yams", package: "Yams"),
+            ]
         ),
         .executableTarget(
             name: "Shorty",

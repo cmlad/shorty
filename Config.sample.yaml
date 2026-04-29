@@ -1,0 +1,34 @@
+shortcuts:
+  bundle-and-title-regex:
+    hotkey: cmd+option+1
+    bundle-id: com.microsoft.VSCode
+    title-regex: ^project-a.*
+
+  bundle-and-title-contains:
+    hotkey: cmd+option+2
+    bundle-id: com.todesktop.230313mzl4w4u92
+    title-contains: snippets
+
+  bundle-and-document-regex:
+    hotkey: cmd+option+3
+    bundle-id: com.todesktop.230313mzl4w4u92
+    document-regex: /Users/example/src/sql/
+
+  bundle-and-url-regex:
+    hotkey: cmd+option+4
+    bundle-id: com.apple.Safari
+    url-regex: github\.com/.*/pull/
+
+  bundle-and-identifier-regex:
+    hotkey: cmd+option+5
+    bundle-id: com.apple.finder
+    identifier-regex: FinderWindow
+
+  app-name-and-window-index:
+    hotkey: cmd+option+6
+    app-name-regex: ^Firefox$
+    window-index: 1
+
+  portable-install-by-executable-path:
+    hotkey: cmd+option+7
+    executable-path-prefix: /Users/example/Apps/PortableCode/Visual Studio Code.app/

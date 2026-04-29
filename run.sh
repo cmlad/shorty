@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_BIN="${SCRIPT_DIR}/.build/arm64-apple-macosx/debug/Shorty"
 
 if [[ ! -x "${BUILD_BIN}" ]]; then
-  (cd "${SCRIPT_DIR}" && swift build)
+  "${SCRIPT_DIR}/build.sh"
 fi
 
-exec "${BUILD_BIN}" --config "${SCRIPT_DIR}/config.json"
+exec "${BUILD_BIN}" --config "${SCRIPT_DIR}/config.yaml"

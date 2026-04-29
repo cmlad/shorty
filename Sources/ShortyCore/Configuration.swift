@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Yams
 
 public enum LaunchMode {
     case run
@@ -84,17 +85,17 @@ public struct LaunchOptions {
             .appendingPathComponent("Library")
             .appendingPathComponent("Application Support")
             .appendingPathComponent("Shorty")
-            .appendingPathComponent("config.json")
+            .appendingPathComponent("config.yaml")
     }
 
     public static let usage = """
     Usage:
-      Shorty [--config /path/to/config.json]
-      Shorty --validate-config [--config /path/to/config.json]
+      Shorty [--config /path/to/config.yaml]
+      Shorty --validate-config [--config /path/to/config.yaml]
       Shorty --list-windows [--verbose]
 
     Options:
-      --config PATH         Use a specific JSON config file
+      --config PATH         Use a specific YAML config file
       --validate-config     Parse and validate config, then exit
       --list-windows        Print accessible windows with bundle ID and title
       --verbose             Print extra window metadata in list mode
@@ -102,8 +103,23 @@ public struct LaunchOptions {
     """
 }
 
-public struct ConfigurationFile: Codable {
+public struct ConfigurationFile: Decodable {
     public let shortcuts: [ShortcutConfiguration]
+
+    enum CodingKeys: String, CodingKey {
+        case shortcuts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let keyedShortcuts = try container.decode([String: ShortcutConfiguration].self, forKey: .shortcuts)
+
+        self.shortcuts = keyedShortcuts
+            .sorted { $0.key < $1.key }
+            .map { element in
+                element.value.withID(element.key)
+            }
+    }
 }
 
 public struct ShortcutConfiguration: Codable {
@@ -111,7 +127,7 @@ public struct ShortcutConfiguration: Codable {
     public let hotkey: String
     public let bundleID: String?
     public let appNameRegex: String?
-    public let executablePathRegex: String?
+    public let executablePathPrefix: String?
     public let titleRegex: String?
     public let titleContains: String?
     public let documentRegex: String?
@@ -122,20 +138,37 @@ public struct ShortcutConfiguration: Codable {
     enum CodingKeys: String, CodingKey {
         case id
         case hotkey
-        case bundleID = "bundleId"
-        case appNameRegex
-        case executablePathRegex
-        case titleRegex
-        case titleContains
-        case documentRegex
-        case urlRegex
-        case identifierRegex
-        case windowIndex
+        case bundleID = "bundle-id"
+        case appNameRegex = "app-name-regex"
+        case executablePathPrefix = "executable-path-prefix"
+        case titleRegex = "title-regex"
+        case titleContains = "title-contains"
+        case documentRegex = "document-regex"
+        case urlRegex = "url-regex"
+        case identifierRegex = "identifier-regex"
+        case windowIndex = "window-index"
+    }
+
+    fileprivate func withID(_ id: String) -> ShortcutConfiguration {
+        ShortcutConfiguration(
+            id: id,
+            hotkey: hotkey,
+            bundleID: bundleID,
+            appNameRegex: appNameRegex,
+            executablePathPrefix: executablePathPrefix,
+            titleRegex: titleRegex,
+            titleContains: titleContains,
+            documentRegex: documentRegex,
+            urlRegex: urlRegex,
+            identifierRegex: identifierRegex,
+            windowIndex: windowIndex
+        )
     }
 }
 
 public enum ConfigurationError: Error, CustomStringConvertible {
     case emptyShortcuts
+    case unsupportedConfigExtension(String)
     case missingMatcher(String)
     case invalidWindowIndex(String, Int)
     case invalidRegex(field: String, shortcutID: String, error: Error)
@@ -145,10 +178,13 @@ public enum ConfigurationError: Error, CustomStringConvertible {
         switch self {
         case .emptyShortcuts:
             return "Config has no shortcuts."
+        case let .unsupportedConfigExtension(fileExtension):
+            let description = fileExtension.isEmpty ? "<none>" : ".\(fileExtension)"
+            return "Unsupported config extension `\(description)`. Use `.yaml` or `.yml`."
         case let .missingMatcher(shortcutID):
             return "Shortcut `\(shortcutID)` needs at least one matcher field."
         case let .invalidWindowIndex(shortcutID, value):
-            return "Shortcut `\(shortcutID)` has invalid windowIndex `\(value)`. Use 0 or higher."
+            return "Shortcut `\(shortcutID)` has invalid window-index `\(value)`. Use 0 or higher."
         case let .invalidRegex(field, shortcutID, error):
             return "Shortcut `\(shortcutID)` has invalid regex for `\(field)`: \(error.localizedDescription)"
         case let .duplicateHotkey(hotkey):
@@ -170,7 +206,7 @@ public struct LoadedShortcut {
 public struct WindowMatcher {
     public let bundleID: String?
     public let appNameRegex: NSRegularExpression?
-    public let executablePathRegex: NSRegularExpression?
+    public let executablePathPrefix: String?
     public let titleRegex: NSRegularExpression?
     public let titleContains: String?
     public let documentRegex: NSRegularExpression?
@@ -245,12 +281,12 @@ public struct WindowMatcher {
             }
         }
 
-        if let executablePathRegex {
+        if let executablePathPrefix {
             guard let executablePath else {
                 return false
             }
 
-            guard Self.matches(regex: executablePathRegex, in: executablePath) else {
+            guard executablePath.hasPrefix(executablePathPrefix) else {
                 return false
             }
         }
@@ -262,39 +298,39 @@ public struct WindowMatcher {
         var parts: [String] = []
 
         if let bundleID {
-            parts.append("bundleId=\(bundleID)")
+            parts.append("bundle-id=\(bundleID)")
         }
 
         if let titleContains {
-            parts.append("titleContains=\(titleContains)")
+            parts.append("title-contains=\(titleContains)")
         }
 
         if let titleRegex {
-            parts.append("titleRegex=\(titleRegex.pattern)")
+            parts.append("title-regex=\(titleRegex.pattern)")
         }
 
         if let documentRegex {
-            parts.append("documentRegex=\(documentRegex.pattern)")
+            parts.append("document-regex=\(documentRegex.pattern)")
         }
 
         if let urlRegex {
-            parts.append("urlRegex=\(urlRegex.pattern)")
+            parts.append("url-regex=\(urlRegex.pattern)")
         }
 
         if let identifierRegex {
-            parts.append("identifierRegex=\(identifierRegex.pattern)")
+            parts.append("identifier-regex=\(identifierRegex.pattern)")
         }
 
         if let appNameRegex {
-            parts.append("appNameRegex=\(appNameRegex.pattern)")
+            parts.append("app-name-regex=\(appNameRegex.pattern)")
         }
 
-        if let executablePathRegex {
-            parts.append("executablePathRegex=\(executablePathRegex.pattern)")
+        if let executablePathPrefix {
+            parts.append("executable-path-prefix=\(executablePathPrefix)")
         }
 
         if windowIndex > 0 {
-            parts.append("windowIndex=\(windowIndex)")
+            parts.append("window-index=\(windowIndex)")
         }
 
         return parts.joined(separator: ", ")
@@ -308,8 +344,14 @@ public struct WindowMatcher {
 
 public enum ConfigurationLoader {
     public static func load(from url: URL) throws -> LoadedConfiguration {
+        let fileExtension = url.pathExtension.lowercased()
+        guard fileExtension == "yaml" || fileExtension == "yml" else {
+            throw ConfigurationError.unsupportedConfigExtension(fileExtension)
+        }
+
         let data = try Data(contentsOf: url)
-        let configuration = try JSONDecoder().decode(ConfigurationFile.self, from: data)
+        let contents = String(decoding: data, as: UTF8.self)
+        let configuration = try YAMLDecoder().decode(ConfigurationFile.self, from: contents)
 
         guard !configuration.shortcuts.isEmpty else {
             throw ConfigurationError.emptyShortcuts
@@ -337,13 +379,13 @@ public enum ConfigurationLoader {
 
             let matcher = WindowMatcher(
                 bundleID: shortcut.bundleID,
-                appNameRegex: try compileRegex(shortcut.appNameRegex, field: "appNameRegex", shortcutID: shortcutID),
-                executablePathRegex: try compileRegex(shortcut.executablePathRegex, field: "executablePathRegex", shortcutID: shortcutID),
-                titleRegex: try compileRegex(shortcut.titleRegex, field: "titleRegex", shortcutID: shortcutID),
+                appNameRegex: try compileRegex(shortcut.appNameRegex, field: "app-name-regex", shortcutID: shortcutID),
+                executablePathPrefix: shortcut.executablePathPrefix,
+                titleRegex: try compileRegex(shortcut.titleRegex, field: "title-regex", shortcutID: shortcutID),
                 titleContains: shortcut.titleContains,
-                documentRegex: try compileRegex(shortcut.documentRegex, field: "documentRegex", shortcutID: shortcutID),
-                urlRegex: try compileRegex(shortcut.urlRegex, field: "urlRegex", shortcutID: shortcutID),
-                identifierRegex: try compileRegex(shortcut.identifierRegex, field: "identifierRegex", shortcutID: shortcutID),
+                documentRegex: try compileRegex(shortcut.documentRegex, field: "document-regex", shortcutID: shortcutID),
+                urlRegex: try compileRegex(shortcut.urlRegex, field: "url-regex", shortcutID: shortcutID),
+                identifierRegex: try compileRegex(shortcut.identifierRegex, field: "identifier-regex", shortcutID: shortcutID),
                 windowIndex: windowIndex
             )
 
@@ -360,9 +402,9 @@ public enum ConfigurationLoader {
     }
 
     private static func hasMatcher(_ shortcut: ShortcutConfiguration) -> Bool {
-        shortcut.bundleID != nil ||
+            shortcut.bundleID != nil ||
             shortcut.appNameRegex != nil ||
-            shortcut.executablePathRegex != nil ||
+            shortcut.executablePathPrefix != nil ||
             shortcut.titleRegex != nil ||
             shortcut.titleContains != nil ||
             shortcut.documentRegex != nil ||
