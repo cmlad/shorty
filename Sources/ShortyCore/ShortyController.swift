@@ -62,6 +62,10 @@ public final class ShortyController {
         }
     }
 
+    public func currentWindows() -> [WindowDescriptor] {
+        windowActivator.listWindows()
+    }
+
     private func startWatchingConfig() {
         configWatcher?.stop()
         configWatcher = ConfigWatcher(url: options.configURL) { [weak self] in

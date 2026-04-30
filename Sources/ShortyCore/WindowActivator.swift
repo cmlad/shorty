@@ -37,6 +37,10 @@ public final class WindowActivator {
     }
 
     public static func requestAccessibilityIfNeeded() -> Bool {
+        if AXIsProcessTrusted() {
+            return true
+        }
+
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }

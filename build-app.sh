@@ -11,14 +11,14 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${CACHE_DIR}/clang}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-${CACHE_DIR}/swiftpm}"
 
+rm -rf "${APP_DIR}"
+
 cd "${SCRIPT_DIR}"
 mkdir -p "${CLANG_MODULE_CACHE_PATH}" "${SWIFTPM_MODULECACHE_OVERRIDE}"
 
-BUILD_FLAGS=("$@")
+"${SCRIPT_DIR}/build.sh" -c release "$@"
 
-"${SCRIPT_DIR}/build.sh" -c release "${BUILD_FLAGS[@]}"
-
-BIN_DIR="$(swift build -c release "${BUILD_FLAGS[@]}" --show-bin-path)"
+BIN_DIR="$(swift build -c release "$@" --show-bin-path)"
 SHORTY_BIN="${BIN_DIR}/Shorty"
 
 if [[ ! -x "${SHORTY_BIN}" ]]; then

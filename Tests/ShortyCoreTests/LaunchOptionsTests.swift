@@ -17,4 +17,9 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertEqual(options.mode, .listWindows)
         XCTAssertEqual(options.windowListFormat, .verbose)
     }
+
+    func testDefaultConfigPath() throws {
+        let options = try LaunchOptions(arguments: ["Shorty"])
+        XCTAssertEqual(options.configURL.path, NSHomeDirectory() + "/config/shorty.yaml")
+    }
 }

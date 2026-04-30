@@ -10,7 +10,7 @@ Example: `cmd+option+1` can always bring your "project-a" VS Code window to the 
 - Finds a matching window by bundle ID, app identity, executable path, and optional window metadata matchers.
 - Unminimizes the window if needed and brings it to the front.
 - Reloads its YAML config file automatically when you save changes.
-- Runs as a menu bar utility with `Reload Config`, `Reveal Config`, and `Quit`.
+- Runs as a menu bar utility with loaded shortcuts, `Show Windows`, `Reload Config`, `Reveal Config`, and `Quit`.
 
 ## Requirements
 
@@ -47,14 +47,14 @@ open ./dist/Shorty.app
 When launched as an app, Shorty uses its default config path:
 
 ```text
-~/Library/Application Support/Shorty/config.yaml
+~/config/shorty.yaml
 ```
 
 Create that directory and put your config there before launching from Finder:
 
 ```bash
-mkdir -p "$HOME/Library/Application Support/Shorty"
-cp ./config.yaml "$HOME/Library/Application Support/Shorty/config.yaml"
+mkdir -p "$HOME/config"
+cp ./config.yaml "$HOME/config/shorty.yaml"
 ```
 
 ## Run
@@ -102,7 +102,7 @@ Verbose mode also prints:
 If you omit `--config`, Shorty looks for:
 
 ```text
-~/Library/Application Support/Shorty/config.yaml
+~/config/shorty.yaml
 ```
 
 The first time you run it, macOS should prompt for Accessibility access. If it does not, add the built `Shorty` binary manually in:

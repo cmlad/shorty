@@ -82,10 +82,8 @@ public struct LaunchOptions {
     public static var defaultConfigURL: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-            .appendingPathComponent("Shorty")
-            .appendingPathComponent("config.yaml")
+            .appendingPathComponent("config")
+            .appendingPathComponent("shorty.yaml")
     }
 
     public static let usage = """

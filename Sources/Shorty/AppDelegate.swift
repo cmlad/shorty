@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller: ShortyController
 
     private var statusItem: NSStatusItem?
+    private var windowsWindow: NSWindow?
+    private weak var windowsTextView: NSTextView?
     private let menu = NSMenu()
     private let stateMenuItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
     private let pathMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -55,6 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(shortcutsHeaderItem)
         menu.addItem(emptyShortcutsItem)
+        menu.addItem(.separator())
+
+        let windowsItem = NSMenuItem(
+            title: "Show Windows",
+            action: #selector(showWindows),
+            keyEquivalent: "w"
+        )
+        windowsItem.target = self
+        menu.addItem(windowsItem)
         menu.addItem(.separator())
 
         let reloadItem = NSMenuItem(
@@ -132,8 +143,157 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if fileManager.fileExists(atPath: configURL.path) {
             NSWorkspace.shared.activateFileViewerSelecting([configURL])
         } else {
-            NSWorkspace.shared.open(configURL.deletingLastPathComponent())
+            let directoryURL = configURL.deletingLastPathComponent()
+            try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(directoryURL)
         }
+    }
+
+    @objc
+    private func showWindows() {
+        let window = windowsWindow ?? makeWindowsWindow()
+        windowsWindow = window
+
+        refreshWindowsWindow()
+
+        if !window.isVisible {
+            window.center()
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc
+    private func refreshWindowsWindow() {
+        windowsTextView?.string = Self.windowListText(controller.currentWindows())
+    }
+
+    private func makeWindowsWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Shorty Windows"
+        window.isReleasedWhenClosed = false
+
+        let contentView = NSView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        window.contentView = contentView
+
+        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshWindowsWindow))
+        refreshButton.bezelStyle = .rounded
+        refreshButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let copyButton = NSButton(title: "Copy", target: self, action: #selector(copyWindowsText))
+        copyButton.bezelStyle = .rounded
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 860, height: 520))
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.autoresizingMask = [.width, .height]
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = false
+        windowsTextView = textView
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.borderType = .bezelBorder
+        scrollView.documentView = textView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(refreshButton)
+        contentView.addSubview(copyButton)
+        contentView.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            refreshButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            refreshButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            copyButton.centerYAnchor.constraint(equalTo: refreshButton.centerYAnchor),
+            copyButton.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -8),
+
+            scrollView.topAnchor.constraint(equalTo: refreshButton.bottomAnchor, constant: 10),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+        ])
+
+        return window
+    }
+
+    @objc
+    private func copyWindowsText() {
+        let text = windowsTextView?.string ?? Self.windowListText(controller.currentWindows())
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    private static func windowListText(_ windows: [WindowDescriptor]) -> String {
+        guard !windows.isEmpty else {
+            return "No windows found."
+        }
+
+        return windows.enumerated().map { index, window in
+            windowText(window, number: index + 1)
+        }.joined(separator: "\n\n")
+    }
+
+    private static func windowText(_ window: WindowDescriptor, number: Int) -> String {
+        var lines = [
+            "Window \(number)",
+            "Bundle ID: \(window.bundleID ?? "<no bundle id>")",
+            "Window title: \(window.title.isEmpty ? "<untitled>" : window.title)",
+            "App name: \(window.appName)",
+            "PID: \(window.pid)",
+            "App window index: \(window.appWindowIndex)",
+        ]
+
+        if let executablePath = window.executablePath {
+            lines.append("Executable path: \(executablePath)")
+        }
+
+        if let document = window.document {
+            lines.append("Document: \(document)")
+        }
+
+        if let url = window.url {
+            lines.append("URL: \(url)")
+        }
+
+        if let identifier = window.identifier {
+            lines.append("Identifier: \(identifier)")
+        }
+
+        if let role = window.role {
+            lines.append("Role: \(role)")
+        }
+
+        if let subrole = window.subrole {
+            lines.append("Subrole: \(subrole)")
+        }
+
+        if let minimized = window.minimized {
+            lines.append("Minimized: \(minimized)")
+        }
+
+        if let position = window.position {
+            lines.append("Position: x=\(Int(position.x)) y=\(Int(position.y))")
+        }
+
+        if let size = window.size {
+            lines.append("Size: width=\(Int(size.width)) height=\(Int(size.height))")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     @objc
