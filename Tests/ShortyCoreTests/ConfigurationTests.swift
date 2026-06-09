@@ -42,6 +42,46 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.shortcuts.first?.id, "project-a")
     }
 
+    func testLoadsGroupedSnippets() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              project-a:
+                hotkey: cmd+option+1
+                bundle-id: com.microsoft.VSCode
+            snippets:
+              Work:
+                Zebra: Last alphabetically but first in config
+                Greeting: Hello there
+                Rich Example: Plain fallback text
+              Personal:
+                Address: 123 Example St
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.snippetGroups.count, 2)
+        XCTAssertEqual(configuration.snippetGroups.map(\.title), ["Work", "Personal"])
+        XCTAssertEqual(configuration.snippetGroups[0].snippets.map(\.title), ["Zebra", "Greeting", "Rich Example"])
+        XCTAssertEqual(configuration.snippetGroups[0].snippets[1].content, "Hello there")
+    }
+
+    func testAllowsSnippetOnlyConfiguration() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            snippets:
+              Work:
+                Greeting: Hello there
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertTrue(configuration.shortcuts.isEmpty)
+        XCTAssertEqual(configuration.snippetGroups.first?.snippets.first?.title, "Greeting")
+    }
+
     func testRejectsArrayConfiguration() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
@@ -55,6 +95,38 @@ final class ConfigurationTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url))
+    }
+
+    func testRejectsReservedClipboardMenuHotkey() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              reserved:
+                hotkey: cmd+shift+v
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("reserved"))
+        }
+    }
+
+    func testRejectsReservedSnippetMenuHotkey() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              reserved:
+                hotkey: cmd+shift+b
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("reserved"))
+        }
     }
 
     func testLoadsExecutablePathPrefixMatcherConfiguration() throws {

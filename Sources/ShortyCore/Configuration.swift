@@ -110,7 +110,7 @@ public struct ConfigurationFile: Decodable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let keyedShortcuts = try container.decode([String: ShortcutConfiguration].self, forKey: .shortcuts)
+        let keyedShortcuts = try container.decodeIfPresent([String: ShortcutConfiguration].self, forKey: .shortcuts) ?? [:]
 
         self.shortcuts = keyedShortcuts
             .sorted { $0.key < $1.key }
@@ -118,6 +118,16 @@ public struct ConfigurationFile: Decodable {
                 element.value.withID(element.key)
             }
     }
+}
+
+public struct SnippetGroup: Equatable, Sendable {
+    public let title: String
+    public let snippets: [Snippet]
+}
+
+public struct Snippet: Equatable, Sendable {
+    public let title: String
+    public let content: String
 }
 
 public struct ShortcutConfiguration: Codable {
@@ -166,16 +176,21 @@ public struct ShortcutConfiguration: Codable {
 
 public enum ConfigurationError: Error, CustomStringConvertible {
     case emptyShortcuts
+    case emptyConfiguration
     case unsupportedConfigExtension(String)
     case missingMatcher(String)
     case invalidWindowIndex(String, Int)
     case invalidRegex(field: String, shortcutID: String, error: Error)
     case duplicateHotkey(String)
+    case reservedHotkey(String, String)
+    case invalidSnippets(String)
 
     public var description: String {
         switch self {
         case .emptyShortcuts:
             return "Config has no shortcuts."
+        case .emptyConfiguration:
+            return "Config has no shortcuts or snippets."
         case let .unsupportedConfigExtension(fileExtension):
             let description = fileExtension.isEmpty ? "<none>" : ".\(fileExtension)"
             return "Unsupported config extension `\(description)`. Use `.yaml` or `.yml`."
@@ -187,12 +202,17 @@ public enum ConfigurationError: Error, CustomStringConvertible {
             return "Shortcut `\(shortcutID)` has invalid regex for `\(field)`: \(error.localizedDescription)"
         case let .duplicateHotkey(hotkey):
             return "Duplicate hotkey `\(hotkey)` in config."
+        case let .reservedHotkey(hotkey, usage):
+            return "Shortcut hotkey `\(hotkey)` is reserved for the \(usage)."
+        case let .invalidSnippets(message):
+            return "Invalid snippets config: \(message)"
         }
     }
 }
 
 public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
+    public let snippetGroups: [SnippetGroup]
 }
 
 public struct LoadedShortcut {
@@ -350,9 +370,10 @@ public enum ConfigurationLoader {
         let data = try Data(contentsOf: url)
         let contents = String(decoding: data, as: UTF8.self)
         let configuration = try YAMLDecoder().decode(ConfigurationFile.self, from: contents)
+        let snippetGroups = try parseSnippetGroups(from: contents)
 
-        guard !configuration.shortcuts.isEmpty else {
-            throw ConfigurationError.emptyShortcuts
+        guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty else {
+            throw ConfigurationError.emptyConfiguration
         }
 
         var seenHotkeys = Set<String>()
@@ -371,6 +392,9 @@ public enum ConfigurationLoader {
             }
 
             let hotKey = try KeyCombo.parse(shortcut.hotkey)
+            if let reservedUsage = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] {
+                throw ConfigurationError.reservedHotkey(hotKey.normalizedValue, reservedUsage)
+            }
             guard seenHotkeys.insert(hotKey.normalizedValue).inserted else {
                 throw ConfigurationError.duplicateHotkey(hotKey.normalizedValue)
             }
@@ -396,7 +420,45 @@ public enum ConfigurationLoader {
             )
         }
 
-        return LoadedConfiguration(shortcuts: loadedShortcuts)
+        return LoadedConfiguration(shortcuts: loadedShortcuts, snippetGroups: snippetGroups)
+    }
+
+    private static func parseSnippetGroups(from contents: String) throws -> [SnippetGroup] {
+        guard let root = try Yams.compose(yaml: contents) else {
+            return []
+        }
+
+        guard let snippetsNode = root["snippets"] else {
+            return []
+        }
+
+        guard let snippetsMapping = snippetsNode.mapping else {
+            throw ConfigurationError.invalidSnippets("`snippets` must be a mapping of groups.")
+        }
+
+        return try snippetsMapping.map { groupPair in
+            guard let groupTitle = groupPair.key.string, !groupTitle.isEmpty else {
+                throw ConfigurationError.invalidSnippets("Snippet group names must be strings.")
+            }
+
+            guard let groupMapping = groupPair.value.mapping else {
+                throw ConfigurationError.invalidSnippets("Snippet group `\(groupTitle)` must contain key-value snippets.")
+            }
+
+            let snippets = try groupMapping.map { snippetPair in
+                guard let title = snippetPair.key.string, !title.isEmpty else {
+                    throw ConfigurationError.invalidSnippets("Snippet names in group `\(groupTitle)` must be strings.")
+                }
+
+                guard let content = snippetPair.value.string else {
+                    throw ConfigurationError.invalidSnippets("Snippet `\(title)` in group `\(groupTitle)` must be a string.")
+                }
+
+                return Snippet(title: title, content: content)
+            }
+
+            return SnippetGroup(title: groupTitle, snippets: snippets)
+        }
     }
 
     private static func hasMatcher(_ shortcut: ShortcutConfiguration) -> Bool {

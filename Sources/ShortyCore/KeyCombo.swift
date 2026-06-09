@@ -21,7 +21,7 @@ public enum KeyComboError: Error, CustomStringConvertible {
     }
 }
 
-public struct KeyCombo: Hashable {
+public struct KeyCombo: Hashable, Sendable {
     public let keyCode: UInt32
     public let modifiers: UInt32
     public let normalizedValue: String

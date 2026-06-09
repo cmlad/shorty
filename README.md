@@ -9,6 +9,8 @@ Example: `cmd+option+1` can always bring your "project-a" VS Code window to the 
 - Registers global shortcuts with native macOS APIs.
 - Finds a matching window by bundle ID, app identity, executable path, and optional window metadata matchers.
 - Unminimizes the window if needed and brings it to the front.
+- Keeps a text/rich-text clipboard history and pastes recent items from `cmd+shift+v`.
+- Pastes YAML-defined snippets from `cmd+shift+v` or `cmd+shift+b`.
 - Reloads its YAML config file automatically when you save changes.
 - Runs as a menu bar utility with loaded shortcuts, `Show Windows`, `Reload Config`, `Reveal Config`, and `Quit`.
 
@@ -147,6 +149,30 @@ shortcuts:
 Each key under `shortcuts` is the shortcut id shown in logs. `Config.sample.yaml` includes examples for every supported matcher type.
 
 The repo-local `config.yaml` is your personal runtime config and is ignored by git.
+
+### Snippet Fields
+
+Snippets live in the same YAML file and use one level of grouping:
+
+```yaml
+snippets:
+  Work:
+    Greeting: Hello from Shorty.
+    Rich Example: Plain fallback text
+  Personal:
+    Address: 123 Example St
+```
+
+The group key becomes a submenu. The snippet key becomes the menu item title. The value is pasted as plain text. Groups and snippets appear in the same order as the config.
+
+Shorty uses these hardcoded clipboard shortcuts:
+
+- `cmd+shift+v`: open a combined clipboard history and snippets menu.
+- `cmd+shift+b`: open a snippets-only menu.
+
+The clipboard menu shows the 20 most recent items directly, then up to 180 more items in 9 submenus of 20. Menu titles use the first line, preserve leading spaces, and are clipped to 60 characters.
+
+These two hotkeys are reserved and cannot be reused by window shortcuts.
 
 ### Shortcut Fields
 

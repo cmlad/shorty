@@ -1,8 +1,9 @@
 import AppKit
 import ShortyCore
+import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller: ShortyController
 
     private var statusItem: NSStatusItem?
@@ -14,6 +15,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
+    private var popupClipboardMenu: NSMenu?
+    private var popupAnchorWindow: NSWindow?
+    private lazy var historyMenuIcon = Self.menuIcon(NSWorkspace.shared.icon(for: UTType.plainText))
+    private lazy var snippetFolderMenuIcon: NSImage = {
+        if let folderIcon = NSImage(named: NSImage.folderName) {
+            return Self.menuIcon(folderIcon)
+        }
+
+        return Self.menuIcon(NSWorkspace.shared.icon(for: UTType.folder))
+    }()
 
     init(controller: ShortyController) {
         self.controller = controller
@@ -26,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.updateStatus(message)
                 self?.reloadShortcutItems()
+            }
+        }
+        controller.clipboardMenuHandler = { [weak self] kind in
+            DispatchQueue.main.async {
+                self?.showClipboardMenu(kind)
             }
         }
 
@@ -237,6 +253,204 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pasteboard.setString(text, forType: .string)
     }
 
+    private func showClipboardMenu(_ kind: ClipboardMenuKind) {
+        guard popupClipboardMenu == nil else {
+            return
+        }
+
+        let popupMenu = NSMenu(title: "Shorty")
+        popupMenu.autoenablesItems = false
+        popupMenu.delegate = self
+
+        switch kind {
+        case .combined:
+            addHistoryItems(to: popupMenu)
+            popupMenu.addItem(.separator())
+            addSnippetItems(to: popupMenu, includeEmptyItem: true)
+        case .snippets:
+            addSnippetItems(to: popupMenu, includeEmptyItem: true)
+        }
+
+        popupClipboardMenu = popupMenu
+        let anchorView = makePopupAnchorView(at: NSEvent.mouseLocation)
+        popupMenu.popUp(positioning: nil, at: .zero, in: anchorView)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        if menu === popupClipboardMenu {
+            popupAnchorWindow?.orderOut(nil)
+            popupAnchorWindow = nil
+            popupClipboardMenu = nil
+        }
+    }
+
+    private func makePopupAnchorView(at point: NSPoint) -> NSView {
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        let window = NSWindow(
+            contentRect: NSRect(x: point.x, y: point.y, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .popUpMenu
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        window.contentView = contentView
+        window.orderFrontRegardless()
+        popupAnchorWindow = window
+        return contentView
+    }
+
+    private func addHistoryItems(to menu: NSMenu) {
+        addDisabledHeader("History", to: menu)
+
+        let items = controller.recentClipboardItems()
+        guard !items.isEmpty else {
+            let emptyItem = NSMenuItem(title: "No clipboard history", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+            return
+        }
+
+        for item in items.prefix(ClipboardConstants.maxDirectMenuItems) {
+            menu.addItem(makeClipboardMenuItem(for: item))
+        }
+
+        let overflowStart = ClipboardConstants.maxDirectMenuItems
+        guard items.count > overflowStart else {
+            return
+        }
+
+        let maxOverflowItems = ClipboardConstants.overflowSubmenuSize * ClipboardConstants.maxOverflowSubmenus
+        let overflowEnd = min(items.count, overflowStart + maxOverflowItems)
+        var rangeStart = overflowStart
+
+        while rangeStart < overflowEnd {
+            let rangeEnd = min(rangeStart + ClipboardConstants.overflowSubmenuSize, overflowEnd)
+            let submenu = NSMenu(title: "")
+            submenu.autoenablesItems = false
+            let submenuItem = NSMenuItem(title: "\(rangeStart + 1) - \(rangeEnd)", action: nil, keyEquivalent: "")
+            submenuItem.image = snippetFolderMenuIcon
+            submenuItem.submenu = submenu
+
+            for item in items[rangeStart..<rangeEnd] {
+                submenu.addItem(makeClipboardMenuItem(for: item))
+            }
+
+            menu.addItem(submenuItem)
+            rangeStart = rangeEnd
+        }
+    }
+
+    private func makeClipboardMenuItem(for item: ClipboardItem) -> NSMenuItem {
+        let menuItem = NSMenuItem(
+            title: item.menuTitle(),
+            action: #selector(selectClipboardMenuItem(_:)),
+            keyEquivalent: ""
+        )
+        menuItem.target = self
+        menuItem.representedObject = ClipboardMenuPayload(item: item)
+        menuItem.toolTip = Self.truncated(item.plainText, maxLength: ClipboardConstants.maxTooltipLength)
+        menuItem.image = historyMenuIcon
+        return menuItem
+    }
+
+    private func addSnippetItems(to menu: NSMenu, includeEmptyItem: Bool) {
+        addDisabledHeader("Snippets", to: menu)
+
+        let groups = controller.currentSnippetGroups().filter { !$0.snippets.isEmpty }
+
+        guard !groups.isEmpty else {
+            if includeEmptyItem {
+                let emptyItem = NSMenuItem(title: "No snippets configured", action: nil, keyEquivalent: "")
+                emptyItem.isEnabled = false
+                menu.addItem(emptyItem)
+            }
+            return
+        }
+
+        for group in groups {
+            let groupItem = NSMenuItem(
+                title: Self.truncated(group.title, maxLength: ClipboardConstants.maxMenuItemTitleLength),
+                action: nil,
+                keyEquivalent: ""
+            )
+            groupItem.image = snippetFolderMenuIcon
+            let submenu = NSMenu(title: group.title)
+            submenu.autoenablesItems = false
+
+            for snippet in group.snippets {
+                let snippetItem = NSMenuItem(
+                    title: Self.truncated(snippet.title, maxLength: ClipboardConstants.maxMenuItemTitleLength),
+                    action: #selector(selectSnippetMenuItem(_:)),
+                    keyEquivalent: ""
+                )
+                snippetItem.target = self
+                snippetItem.representedObject = SnippetMenuPayload(snippet: snippet)
+                snippetItem.toolTip = Self.truncated(snippet.content, maxLength: ClipboardConstants.maxTooltipLength)
+                snippetItem.image = historyMenuIcon
+                submenu.addItem(snippetItem)
+            }
+
+            groupItem.submenu = submenu
+            menu.addItem(groupItem)
+        }
+    }
+
+    private func addDisabledHeader(_ title: String, to menu: NSMenu) {
+        let headerItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        menu.addItem(headerItem)
+    }
+
+    private static func menuIcon(_ source: NSImage, size: CGFloat = 18) -> NSImage {
+        let targetSize = NSSize(width: size, height: size)
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        source.draw(
+            in: NSRect(origin: .zero, size: targetSize),
+            from: NSRect(origin: .zero, size: source.size),
+            operation: .sourceOver,
+            fraction: 1
+        )
+        image.unlockFocus()
+        image.isTemplate = source.isTemplate
+        return image
+    }
+
+    @objc
+    private func selectClipboardMenuItem(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ClipboardMenuPayload else {
+            NSSound.beep()
+            return
+        }
+
+        controller.pasteClipboardItem(payload.item)
+    }
+
+    @objc
+    private func selectSnippetMenuItem(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? SnippetMenuPayload else {
+            NSSound.beep()
+            return
+        }
+
+        controller.pasteSnippet(payload.snippet)
+    }
+
+    private static func truncated(_ value: String, maxLength: Int) -> String {
+        let symbol = "..."
+        guard maxLength > symbol.count, value.count > maxLength else {
+            return value
+        }
+
+        let endIndex = value.index(value.startIndex, offsetBy: maxLength - symbol.count)
+        return String(value[..<endIndex]) + symbol
+    }
+
     private static func windowListText(_ windows: [WindowDescriptor]) -> String {
         guard !windows.isEmpty else {
             return "No windows found."
@@ -299,5 +513,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+private final class ClipboardMenuPayload: NSObject {
+    let item: ClipboardItem
+
+    init(item: ClipboardItem) {
+        self.item = item
+    }
+}
+
+private final class SnippetMenuPayload: NSObject {
+    let snippet: Snippet
+
+    init(snippet: Snippet) {
+        self.snippet = snippet
     }
 }

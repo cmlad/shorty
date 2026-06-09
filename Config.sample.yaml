@@ -32,3 +32,10 @@ shortcuts:
   portable-install-by-executable-path:
     hotkey: cmd+option+7
     executable-path-prefix: /Users/example/Apps/PortableCode/Visual Studio Code.app/
+
+snippets:
+  Work:
+    Greeting: Hello from Shorty.
+    Rich Example: Plain fallback text
+  Personal:
+    Address: 123 Example St
