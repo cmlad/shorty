@@ -47,6 +47,66 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertEqual(restoredPasteboard.data(forType: .rtf), rtfData)
     }
 
+    func testCopyTextToPasteboardOmitsRichRepresentations() throws {
+        let pasteboard = uniquePasteboard()
+        let item = ClipboardItem(
+            plainText: "Clean",
+            rtfData: try makeRTFData("Clean"),
+            additionalRepresentations: [
+                ClipboardRepresentation(type: "com.apple.notes.richtext", data: Data("rich".utf8)),
+            ]
+        )
+        let paster = ClipboardPaster(pasteboard: pasteboard)
+
+        paster.copyToPasteboard(item)
+        XCTAssertNotNil(pasteboard.data(forType: .rtf))
+
+        paster.copyTextToPasteboard(item.plainText)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "Clean")
+        XCTAssertNil(pasteboard.data(forType: .rtf))
+        XCTAssertNil(pasteboard.data(forType: NSPasteboard.PasteboardType("com.apple.notes.richtext")))
+    }
+
+    func testReadsAndRestoresAdditionalRichTextRepresentations() throws {
+        let pasteboard = uniquePasteboard()
+        let notesType = NSPasteboard.PasteboardType("com.apple.notes.richtext")
+        let notesData = Data("notes checklist payload".utf8)
+
+        pasteboard.declareTypes([notesType, .string], owner: nil)
+        pasteboard.setData(notesData, forType: notesType)
+        pasteboard.setString("Checklist", forType: .string)
+
+        let item = try XCTUnwrap(ClipboardItem.read(from: pasteboard))
+        XCTAssertEqual(item.additionalRepresentations, [
+            ClipboardRepresentation(type: notesType.rawValue, data: notesData),
+        ])
+
+        let restoredPasteboard = uniquePasteboard()
+        let paster = ClipboardPaster(pasteboard: restoredPasteboard)
+        paster.copyToPasteboard(item)
+
+        XCTAssertEqual(restoredPasteboard.string(forType: .string), "Checklist")
+        XCTAssertEqual(restoredPasteboard.data(forType: notesType), notesData)
+    }
+
+    func testDecodesLegacyHistoryItemsWithoutAdditionalRepresentations() throws {
+        let legacyJSON = """
+        [{
+          "id": "legacy",
+          "plainText": "Legacy",
+          "createdAt": 0,
+          "updatedAt": 0
+        }]
+        """.data(using: .utf8)!
+
+        let items = try JSONDecoder().decode([ClipboardItem].self, from: legacyJSON)
+
+        XCTAssertEqual(items.first?.id, "legacy")
+        XCTAssertEqual(items.first?.plainText, "Legacy")
+        XCTAssertEqual(items.first?.additionalRepresentations, [])
+    }
+
     func testIgnoresEmptyTextOnlyPasteboardItem() {
         let pasteboard = uniquePasteboard()
 

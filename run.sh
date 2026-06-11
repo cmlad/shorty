@@ -8,4 +8,4 @@ if [[ ! -x "${BUILD_BIN}" ]]; then
   "${SCRIPT_DIR}/build.sh"
 fi
 
-exec "${BUILD_BIN}" --config "${SCRIPT_DIR}/config.yaml"
+exec "${BUILD_BIN}" 

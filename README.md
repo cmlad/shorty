@@ -11,6 +11,8 @@ Example: `cmd+option+1` can always bring your "project-a" VS Code window to the 
 - Unminimizes the window if needed and brings it to the front.
 - Keeps a text/rich-text clipboard history and pastes recent items from `cmd+shift+v`.
 - Pastes YAML-defined snippets from `cmd+shift+v` or `cmd+shift+b`.
+- Shows a lightweight window switcher with `cmd+tab`, plus a current-app window switcher with `cmd+tilde/backquote`.
+- Moves and resizes the focused window with Rectangle-style hardcoded shortcuts.
 - Reloads its YAML config file automatically when you save changes.
 - Runs as a menu bar utility with loaded shortcuts, `Show Windows`, `Reload Config`, `Reveal Config`, and `Quit`.
 
@@ -45,6 +47,8 @@ Run it with:
 ```bash
 open ./dist/Shorty.app
 ```
+
+After code changes, run `./build-app.sh` again, quit the old Shorty instance from the menu bar, and reopen `./dist/Shorty.app`. macOS permissions are tied to the app or binary you launch, so testing the `.app` needs the rebuilt `.app`, not the raw `.build` binary.
 
 When launched as an app, Shorty uses its default config path:
 
@@ -107,7 +111,7 @@ If you omit `--config`, Shorty looks for:
 ~/config/shorty.yaml
 ```
 
-The first time you run it, macOS should prompt for Accessibility access. If it does not, add the built `Shorty` binary manually in:
+The first time you run it, macOS should prompt for Accessibility access. Shorty's status menu also includes a direct link to the relevant privacy pane. If the app appears in the list, enable its toggle; if it does not, add the built `Shorty` binary manually in:
 
 `System Settings > Privacy & Security > Accessibility`
 
@@ -172,7 +176,34 @@ Shorty uses these hardcoded clipboard shortcuts:
 
 The clipboard menu shows the 20 most recent items directly, then up to 180 more items in 9 submenus of 20. Menu titles use the first line, preserve leading spaces, and are clipped to 60 characters.
 
-These two hotkeys are reserved and cannot be reused by window shortcuts.
+Hold `cmd` while selecting a clipboard history item, including pressing `return`, to paste its plain-text version without formatting.
+
+### Window Switcher
+
+Shorty uses these hardcoded window switcher shortcuts:
+
+- `cmd+tab`: show all windows in last-use order.
+- `cmd+tilde/backquote`: show windows from the current app in last-use order.
+
+Keep holding Command and press Tab or tilde/backquote again to move down the list. Press Shift-Tab to move up. Release Command to activate the selected window. Press Escape to cancel.
+
+The switcher uses a cached, low-detail Accessibility snapshot: app name, bundle ID, process ID, AX window reference, and title. It does not use the slower verbose metadata path from `--list-windows --verbose`.
+
+If a window matches a configured shortcut, the switcher shows that shortcut id before the window title. If multiple windows match the same shortcut, they all show the shortcut id, even when the shortcut uses `window-index` for activation. Shortcuts that depend on document, URL, or identifier metadata are labeled after Shorty's background metadata cache has refreshed.
+
+### Window Movement
+
+Shorty uses these hardcoded window movement shortcuts:
+
+- `ctrl+option+left`: move the focused window to the left half of the current monitor. If already in the left half, move to the right half of the monitor to the left. From the leftmost monitor, wrap to the right half of the rightmost monitor.
+- `ctrl+option+right`: move the focused window to the right half of the current monitor. If already in the right half, move to the left half of the monitor to the right. From the rightmost monitor, wrap to the left half of the leftmost monitor.
+- `ctrl+option+cmd+up`: maximize the focused window to the current monitor's usable area.
+- `ctrl+option+cmd+left`: move the focused window to the monitor to the left, preserving proportional position and size. Wraps from leftmost to rightmost.
+- `ctrl+option+cmd+right`: move the focused window to the monitor to the right, preserving proportional position and size. Wraps from rightmost to leftmost.
+
+Window movement uses each monitor's visible frame, so windows avoid the menu bar and Dock. Some full-screen, minimized, or non-resizable windows may refuse Accessibility resize commands.
+
+These hotkeys are reserved and cannot be reused by window shortcuts.
 
 ### Shortcut Fields
 

@@ -8,6 +8,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public var plainText: String
     public var rtfData: Data?
     public var rtfdData: Data?
+    public var additionalRepresentations: [ClipboardRepresentation]
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -15,13 +16,20 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         plainText: String,
         rtfData: Data? = nil,
         rtfdData: Data? = nil,
+        additionalRepresentations: [ClipboardRepresentation] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
-        self.id = Self.makeID(plainText: plainText, rtfData: rtfData, rtfdData: rtfdData)
+        self.id = Self.makeID(
+            plainText: plainText,
+            rtfData: rtfData,
+            rtfdData: rtfdData,
+            additionalRepresentations: additionalRepresentations
+        )
         self.plainText = plainText
         self.rtfData = rtfData
         self.rtfdData = rtfdData
+        self.additionalRepresentations = additionalRepresentations
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -29,12 +37,16 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public static func read(from pasteboard: NSPasteboard, now: Date = Date()) -> ClipboardItem? {
         let rtfData = firstData(from: pasteboard, types: PasteboardTypes.rtf)
         let rtfdData = firstData(from: pasteboard, types: PasteboardTypes.rtfd)
+        let additionalRepresentations = additionalRepresentations(from: pasteboard)
         let plainText = firstString(from: pasteboard, types: PasteboardTypes.string)
             ?? plainText(fromRTFDData: rtfdData)
             ?? plainText(fromRTFData: rtfData)
             ?? ""
 
-        guard !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || rtfData != nil || rtfdData != nil else {
+        guard !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            rtfData != nil ||
+            rtfdData != nil ||
+            !additionalRepresentations.isEmpty else {
             return nil
         }
 
@@ -42,6 +54,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             plainText: plainText,
             rtfData: rtfData,
             rtfdData: rtfdData,
+            additionalRepresentations: additionalRepresentations,
             createdAt: now,
             updatedAt: now
         )
@@ -89,7 +102,57 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         return attributed.string
     }
 
-    private static func makeID(plainText: String, rtfData: Data?, rtfdData: Data?) -> String {
+    private static func additionalRepresentations(from pasteboard: NSPasteboard) -> [ClipboardRepresentation] {
+        guard let item = pasteboard.pasteboardItems?.first else {
+            return []
+        }
+
+        let builtInTypes = Set((PasteboardTypes.string + PasteboardTypes.rtf + PasteboardTypes.rtfd).map(\.rawValue))
+
+        return item.types.compactMap { type in
+            guard !builtInTypes.contains(type.rawValue),
+                  shouldPreserveAdditionalType(type),
+                  let data = item.data(forType: type),
+                  !data.isEmpty else {
+                return nil
+            }
+
+            return ClipboardRepresentation(type: type.rawValue, data: data)
+        }
+    }
+
+    private static func shouldPreserveAdditionalType(_ type: NSPasteboard.PasteboardType) -> Bool {
+        let rawValue = type.rawValue.lowercased()
+
+        if rawValue.contains("image") ||
+            rawValue.contains("png") ||
+            rawValue.contains("tiff") ||
+            rawValue.contains("jpeg") ||
+            rawValue.contains("pdf") ||
+            rawValue.contains("file") ||
+            rawValue.contains("url") ||
+            rawValue.contains("sound") ||
+            rawValue.contains("movie") ||
+            rawValue.contains("video") ||
+            rawValue.contains("promise") ||
+            rawValue.contains("bookmark") {
+            return false
+        }
+
+        return rawValue.contains("html") ||
+            rawValue.contains("webarchive") ||
+            rawValue.contains("web archive") ||
+            rawValue.contains("attributed") ||
+            rawValue.contains("rich") ||
+            rawValue.hasPrefix("com.apple.notes")
+    }
+
+    private static func makeID(
+        plainText: String,
+        rtfData: Data?,
+        rtfdData: Data?,
+        additionalRepresentations: [ClipboardRepresentation]
+    ) -> String {
         var data = Data()
         data.appendUTF8("plainText:")
         data.appendUTF8(plainText)
@@ -104,9 +167,68 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             data.append(rtfdData)
         }
 
+        for representation in additionalRepresentations {
+            data.appendUTF8("\nadditional:")
+            data.appendUTF8(representation.type)
+            data.appendUTF8(":")
+            data.append(representation.data)
+        }
+
         return SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case plainText
+        case rtfData
+        case rtfdData
+        case additionalRepresentations
+        case createdAt
+        case updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        plainText = try container.decode(String.self, forKey: .plainText)
+        rtfData = try container.decodeIfPresent(Data.self, forKey: .rtfData)
+        rtfdData = try container.decodeIfPresent(Data.self, forKey: .rtfdData)
+        additionalRepresentations = try container.decodeIfPresent(
+            [ClipboardRepresentation].self,
+            forKey: .additionalRepresentations
+        ) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? Self.makeID(
+            plainText: plainText,
+            rtfData: rtfData,
+            rtfdData: rtfdData,
+            additionalRepresentations: additionalRepresentations
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(plainText, forKey: .plainText)
+        try container.encodeIfPresent(rtfData, forKey: .rtfData)
+        try container.encodeIfPresent(rtfdData, forKey: .rtfdData)
+        if !additionalRepresentations.isEmpty {
+            try container.encode(additionalRepresentations, forKey: .additionalRepresentations)
+        }
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+public struct ClipboardRepresentation: Codable, Equatable, Sendable {
+    public let type: String
+    public let data: Data
+
+    public init(type: String, data: Data) {
+        self.type = type
+        self.data = data
     }
 }
 
@@ -281,17 +403,26 @@ public final class ClipboardPaster {
     public func copyToPasteboard(_ item: ClipboardItem) {
         var types: [NSPasteboard.PasteboardType] = []
 
+        appendUnique(
+            item.additionalRepresentations.map { NSPasteboard.PasteboardType($0.type) },
+            to: &types
+        )
+
         if item.rtfdData != nil {
-            types.append(contentsOf: PasteboardTypes.rtfd)
+            appendUnique(PasteboardTypes.rtfd, to: &types)
         }
 
         if item.rtfData != nil {
-            types.append(contentsOf: PasteboardTypes.rtf)
+            appendUnique(PasteboardTypes.rtf, to: &types)
         }
 
-        types.append(contentsOf: PasteboardTypes.string)
+        appendUnique(PasteboardTypes.string, to: &types)
 
         pasteboard.declareTypes(types, owner: nil)
+
+        for representation in item.additionalRepresentations {
+            pasteboard.setData(representation.data, forType: NSPasteboard.PasteboardType(representation.type))
+        }
 
         if let rtfdData = item.rtfdData {
             PasteboardTypes.rtfd.forEach { pasteboard.setData(rtfdData, forType: $0) }
@@ -331,6 +462,15 @@ public final class ClipboardPaster {
 
             keyDown?.post(tap: .cgAnnotatedSessionEventTap)
             keyUp?.post(tap: .cgAnnotatedSessionEventTap)
+        }
+    }
+
+    private func appendUnique(
+        _ newTypes: [NSPasteboard.PasteboardType],
+        to types: inout [NSPasteboard.PasteboardType]
+    ) {
+        for type in newTypes where !types.contains(type) {
+            types.append(type)
         }
     }
 }

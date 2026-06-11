@@ -129,6 +129,64 @@ final class ConfigurationTests: XCTestCase {
         }
     }
 
+    func testRejectsReservedWindowSwitcherHotkey() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              reserved:
+                hotkey: cmd+tab
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("reserved"))
+        }
+    }
+
+    func testRejectsReservedCurrentAppWindowSwitcherHotkey() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              reserved:
+                hotkey: cmd+grave
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("reserved"))
+        }
+    }
+
+    func testRejectsReservedWindowMovementHotkeys() throws {
+        let hotkeys = [
+            "ctrl+option+left",
+            "ctrl+option+right",
+            "ctrl+option+cmd+up",
+            "ctrl+option+cmd+left",
+            "ctrl+option+cmd+right",
+        ]
+
+        for hotkey in hotkeys {
+            let url = try temporaryConfigURL(
+                extension: "yaml",
+                contents: """
+                shortcuts:
+                  reserved:
+                    hotkey: \(hotkey)
+                    bundle-id: com.microsoft.VSCode
+                """
+            )
+
+            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to be reserved") { error in
+                XCTAssertTrue(String(describing: error).contains("reserved"))
+            }
+        }
+    }
+
     func testLoadsExecutablePathPrefixMatcherConfiguration() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",

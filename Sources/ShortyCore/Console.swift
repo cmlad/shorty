@@ -1,7 +1,15 @@
 import Foundation
+import OSLog
 
 public final class Console {
-    public init() {}
+    private let logger: Logger
+
+    public init(
+        subsystem: String = "dev.shorty.Shorty",
+        category: String = "Shorty"
+    ) {
+        self.logger = Logger(subsystem: subsystem, category: category)
+    }
 
     public func info(_ message: String) {
         write(level: "INFO", message: message)
@@ -18,5 +26,12 @@ public final class Console {
         }
 
         FileHandle.standardError.write(data)
+
+        switch level {
+        case "ERROR":
+            logger.error("\(message, privacy: .public)")
+        default:
+            logger.info("\(message, privacy: .public)")
+        }
     }
 }

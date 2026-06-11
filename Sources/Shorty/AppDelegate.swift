@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ShortyCore
 import UniformTypeIdentifiers
 
@@ -17,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dynamicShortcutItems: [NSMenuItem] = []
     private var popupClipboardMenu: NSMenu?
     private var popupAnchorWindow: NSWindow?
+    private lazy var popupModifierTracker = PopupModifierTracker { [weak self] in
+        self?.pasteHighlightedClipboardItemAsPlainText() ?? false
+    }
+    private let windowSwitcherPanel = WindowSwitcherPanelController()
     private lazy var historyMenuIcon = Self.menuIcon(NSWorkspace.shared.icon(for: UTType.plainText))
     private lazy var snippetFolderMenuIcon: NSImage = {
         if let folderIcon = NSImage(named: NSImage.folderName) {
@@ -42,6 +47,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.clipboardMenuHandler = { [weak self] kind in
             DispatchQueue.main.async {
                 self?.showClipboardMenu(kind)
+            }
+        }
+        controller.windowSwitcherHandler = { [weak self] update in
+            DispatchQueue.main.async {
+                self?.handleWindowSwitcherUpdate(update)
+            }
+        }
+        controller.permissionRequestHandler = { [weak self] pane in
+            DispatchQueue.main.async {
+                self?.openPermissionSettings(pane)
             }
         }
 
@@ -101,6 +116,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(revealItem)
 
         menu.addItem(.separator())
+
+        let accessibilityItem = NSMenuItem(
+            title: "Open Accessibility Settings",
+            action: #selector(openAccessibilitySettings),
+            keyEquivalent: ""
+        )
+        accessibilityItem.target = self
+        menu.addItem(accessibilityItem)
 
         let quitItem = NSMenuItem(
             title: "Quit",
@@ -163,6 +186,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
             NSWorkspace.shared.open(directoryURL)
         }
+    }
+
+    @objc
+    private func openAccessibilitySettings() {
+        openPermissionSettings(.accessibility)
+    }
+
+    private func openPermissionSettings(_ pane: ShortyPermissionPane) {
+        let urlString: String
+        switch pane {
+        case .accessibility:
+            urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        }
+
+        guard let url = URL(string: urlString) else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 
     @objc
@@ -272,8 +314,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         popupClipboardMenu = popupMenu
+        popupModifierTracker.start()
         let anchorView = makePopupAnchorView(at: NSEvent.mouseLocation)
-        popupMenu.popUp(positioning: nil, at: .zero, in: anchorView)
+        popupMenu.popUp(positioning: Self.firstSelectableItem(in: popupMenu), at: .zero, in: anchorView)
+    }
+
+    private func handleWindowSwitcherUpdate(_ update: WindowSwitcherUpdate) {
+        switch update {
+        case let .show(snapshot):
+            windowSwitcherPanel.show(snapshot)
+        case let .update(snapshot):
+            windowSwitcherPanel.update(snapshot)
+        case .hide:
+            windowSwitcherPanel.hide()
+        }
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -281,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             popupAnchorWindow?.orderOut(nil)
             popupAnchorWindow = nil
             popupClipboardMenu = nil
+            popupModifierTracker.stop()
         }
     }
 
@@ -421,6 +476,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
+    private static func firstSelectableItem(in menu: NSMenu) -> NSMenuItem? {
+        menu.items.first { item in
+            !item.isSeparatorItem && item.isEnabled && item.action != nil
+        } ?? menu.items.first { item in
+            !item.isSeparatorItem && item.isEnabled
+        }
+    }
+
+    private func pasteHighlightedClipboardItemAsPlainText() -> Bool {
+        guard let payload = highlightedClipboardPayload(in: popupClipboardMenu) else {
+            return false
+        }
+
+        popupClipboardMenu?.cancelTracking()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.controller.pasteClipboardItemAsPlainText(payload.item)
+        }
+
+        return true
+    }
+
+    private func highlightedClipboardPayload(in menu: NSMenu?) -> ClipboardMenuPayload? {
+        guard let menu else {
+            return nil
+        }
+
+        let highlightedSearch = highlightedClipboardPayloadSearch(in: menu)
+        if highlightedSearch.foundHighlight {
+            return highlightedSearch.payload
+        }
+
+        return firstClipboardPayload(in: menu)
+    }
+
+    private func highlightedClipboardPayloadSearch(
+        in menu: NSMenu
+    ) -> (foundHighlight: Bool, payload: ClipboardMenuPayload?) {
+        if let highlightedItem = menu.highlightedItem {
+            return (true, highlightedItem.representedObject as? ClipboardMenuPayload)
+        }
+
+        for item in menu.items {
+            guard let submenu = item.submenu else {
+                continue
+            }
+
+            let result = highlightedClipboardPayloadSearch(in: submenu)
+            if result.foundHighlight {
+                return result
+            }
+        }
+
+        return (false, nil)
+    }
+
+    private func firstClipboardPayload(in menu: NSMenu) -> ClipboardMenuPayload? {
+        for item in menu.items {
+            if let payload = item.representedObject as? ClipboardMenuPayload {
+                return payload
+            }
+
+            if let submenu = item.submenu, let payload = firstClipboardPayload(in: submenu) {
+                return payload
+            }
+        }
+
+        return nil
+    }
+
     @objc
     private func selectClipboardMenuItem(_ sender: NSMenuItem) {
         guard let payload = sender.representedObject as? ClipboardMenuPayload else {
@@ -428,7 +553,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        controller.pasteClipboardItem(payload.item)
+        if popupModifierTracker.shouldPasteAsPlainText(triggeringEvent: NSApp.currentEvent) {
+            controller.pasteClipboardItemAsPlainText(payload.item)
+        } else {
+            controller.pasteClipboardItem(payload.item)
+        }
     }
 
     @objc
@@ -521,6 +650,170 @@ private final class ClipboardMenuPayload: NSObject {
 
     init(item: ClipboardItem) {
         self.item = item
+    }
+}
+
+private final class PopupModifierTracker {
+    private let commandReturnHandler: () -> Bool
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var commandIsDown = false
+    private var plainTextPasteIntentDeadline: Date?
+
+    init(commandReturnHandler: @escaping () -> Bool) {
+        self.commandReturnHandler = commandReturnHandler
+    }
+
+    deinit {
+        stop()
+    }
+
+    func start() {
+        stop()
+        commandIsDown = false
+        plainTextPasteIntentDeadline = nil
+
+        let mask =
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.rightMouseDown.rawValue) |
+            (1 << CGEventType.otherMouseDown.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.tapDisabledByTimeout.rawValue) |
+            (1 << CGEventType.tapDisabledByUserInput.rawValue)
+
+        guard let eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(mask),
+            callback: Self.eventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            return
+        }
+
+        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+
+        self.eventTap = eventTap
+        self.runLoopSource = runLoopSource
+    }
+
+    func stop() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+
+        eventTap = nil
+        runLoopSource = nil
+        commandIsDown = false
+        plainTextPasteIntentDeadline = nil
+    }
+
+    func shouldPasteAsPlainText(triggeringEvent: NSEvent?) -> Bool {
+        if let deadline = plainTextPasteIntentDeadline {
+            plainTextPasteIntentDeadline = nil
+            if deadline >= Date() {
+                return true
+            }
+        }
+
+        guard let triggeringEvent else {
+            return false
+        }
+
+        return Self.isCommandMenuSelection(triggeringEvent)
+    }
+
+    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
+        guard let userInfo else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let tracker = Unmanaged<PopupModifierTracker>.fromOpaque(userInfo).takeUnretainedValue()
+        return tracker.handle(type: type, event: event)
+    }
+
+    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        let eventCommandIsDown = event.flags.contains(.maskCommand) || Self.isCommandPressed()
+
+        switch type {
+        case .flagsChanged:
+            commandIsDown = eventCommandIsDown
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            if eventCommandIsDown {
+                plainTextPasteIntentDeadline = Date().addingTimeInterval(1.0)
+            }
+        case .keyDown:
+            let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+            if Self.isReturnKey(keyCode), eventCommandIsDown || commandIsDown {
+                plainTextPasteIntentDeadline = Date().addingTimeInterval(1.0)
+                if handleCommandReturn() {
+                    return nil
+                }
+            }
+        default:
+            break
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+
+    private func handleCommandReturn() -> Bool {
+        guard Thread.isMainThread else {
+            return false
+        }
+
+        return commandReturnHandler()
+    }
+
+    private static func isCommandPressed() -> Bool {
+        let appKitCommandIsDown = NSEvent.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
+        let coreGraphicsCommandIsDown = CGEventSource
+            .flagsState(.combinedSessionState)
+            .contains(.maskCommand)
+        let physicalCommandIsDown =
+            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_Command)) ||
+            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_RightCommand))
+
+        return appKitCommandIsDown || coreGraphicsCommandIsDown || physicalCommandIsDown
+    }
+
+    private static func isCommandMenuSelection(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
+        else {
+            return false
+        }
+
+        switch event.type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+            return true
+        case .keyDown, .keyUp:
+            return isReturnKey(UInt32(event.keyCode))
+        default:
+            return false
+        }
+    }
+
+    private static func isReturnKey(_ keyCode: UInt32) -> Bool {
+        keyCode == UInt32(kVK_Return) || keyCode == UInt32(kVK_ANSI_KeypadEnter)
     }
 }
 

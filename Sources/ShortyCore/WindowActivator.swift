@@ -92,6 +92,39 @@ public final class WindowActivator {
             }
     }
 
+    @discardableResult
+    public func activate(_ switchableWindow: SwitchableWindow) -> ActivationResult {
+        guard let app = NSRunningApplication(processIdentifier: switchableWindow.pid) else {
+            let message = "No running application found for selected window."
+            console.error(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        guard !app.isTerminated else {
+            let message = "Selected window's application has terminated."
+            console.error(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        let target = MatchedWindow(
+            app: app,
+            window: switchableWindow.axWindow,
+            appWindowIndex: 0,
+            executablePath: app.executableURL?.path,
+            title: switchableWindow.title,
+            document: nil,
+            url: nil,
+            identifier: nil,
+            role: nil,
+            subrole: nil,
+            position: nil,
+            size: nil,
+            minimized: nil
+        )
+
+        return activateResolvedWindow(target, actionDescription: "window switcher")
+    }
+
     private func matchingWindows(for matcher: WindowMatcher) -> [MatchedWindow] {
         enumerateWindows(detail: .matching(for: matcher), for: matcher).filter { window in
             matcher.matches(
@@ -274,6 +307,10 @@ public final class WindowActivator {
     }
 
     private func activateResolvedWindow(_ target: MatchedWindow, for shortcut: LoadedShortcut) -> ActivationResult {
+        activateResolvedWindow(target, actionDescription: "shortcut `\(shortcut.id)`")
+    }
+
+    private func activateResolvedWindow(_ target: MatchedWindow, actionDescription: String) -> ActivationResult {
         if target.app.isHidden {
             target.app.unhide()
         }
@@ -287,7 +324,7 @@ public final class WindowActivator {
         }
 
         let titlePart = target.title.isEmpty ? "untitled window" : "\"\(target.title)\""
-        let message = "Activated \(titlePart) for shortcut `\(shortcut.id)`."
+        let message = "Activated \(titlePart) for \(actionDescription)."
         console.info(message)
         return ActivationResult(succeeded: true, message: message)
     }

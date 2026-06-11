@@ -1,21 +1,36 @@
 import Foundation
 
+public enum ShortyPermissionPane: Hashable, Sendable {
+    case accessibility
+}
+
 public final class ShortyController {
     public typealias StatusHandler = (String) -> Void
 
     public let options: LaunchOptions
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
+    public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
+    public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
 
     private let console: Console
     private let hotKeyCenter: HotKeyCenter
     private let windowActivator: WindowActivator
+    private let windowMover: WindowMover
     private let clipboardHistoryStore: ClipboardHistoryStore
     private let clipboardMonitor: ClipboardMonitor
     private let clipboardPaster: ClipboardPaster
+    private let windowSwitchingIndex: WindowSwitchingIndex
+    private lazy var windowSwitcherEventTap = WindowSwitcherEventTap { [weak self] event in
+        self?.handleWindowSwitcherEvent(event)
+    }
     private var configWatcher: ConfigWatcher?
+    private var activeWindowSwitcherMode: WindowSwitcherMode?
+    private var activeWindowSwitcherWindows: [SwitchableWindow] = []
+    private var activeWindowSwitcherSelection: WindowSwitcherSessionState?
+    private var requestedPermissionPanes: Set<ShortyPermissionPane> = []
 
     public init(
         options: LaunchOptions,
@@ -25,10 +40,12 @@ public final class ShortyController {
         self.options = options
         self.console = console
         self.windowActivator = WindowActivator(console: console)
+        self.windowMover = WindowMover(console: console)
         self.clipboardHistoryStore = clipboardHistoryStore
         let clipboardMonitor = ClipboardMonitor(store: clipboardHistoryStore)
         self.clipboardMonitor = clipboardMonitor
         self.clipboardPaster = ClipboardPaster(monitor: clipboardMonitor)
+        self.windowSwitchingIndex = WindowSwitchingIndex()
         self.hotKeyCenter = try HotKeyCenter { [windowActivator] shortcut in
             let result = windowActivator.activate(shortcut)
             if !result.succeeded {
@@ -38,12 +55,17 @@ public final class ShortyController {
     }
 
     public func start() {
+        console.info("Starting Shorty with config \(options.configURL.path).")
+
         if !WindowActivator.requestAccessibilityIfNeeded() {
             publishStatus("Accessibility permission required")
+            requestPermissionPane(.accessibility)
         }
 
-        registerClipboardHotKeys()
+        registerReservedHotKeys()
         clipboardMonitor.start()
+        windowSwitchingIndex.start()
+        startWindowSwitcherEventTap()
         reloadConfig(reason: "startup")
         startWatchingConfig()
     }
@@ -51,6 +73,8 @@ public final class ShortyController {
     public func stop() {
         configWatcher?.stop()
         clipboardMonitor.stop()
+        windowSwitchingIndex.stop()
+        windowSwitcherEventTap.stop()
         hotKeyCenter.unregisterAll()
     }
 
@@ -59,6 +83,7 @@ public final class ShortyController {
             let configuration = try ConfigurationLoader.load(from: options.configURL)
             try hotKeyCenter.replace(with: configuration.shortcuts)
             windowActivator.resetCache()
+            windowSwitchingIndex.replaceShortcuts(configuration.shortcuts)
             loadedShortcuts = configuration.shortcuts
             loadedSnippetGroups = configuration.snippetGroups
 
@@ -96,28 +121,159 @@ public final class ShortyController {
     }
 
     public func pasteClipboardItem(_ item: ClipboardItem) {
+        console.info("Pasting clipboard history item with rich representations.")
         clipboardPaster.paste(item)
+    }
+
+    public func pasteClipboardItemAsPlainText(_ item: ClipboardItem) {
+        console.info("Pasting clipboard history item as plain text.")
+        clipboardPaster.pasteText(item.plainText)
     }
 
     public func pasteSnippet(_ snippet: Snippet) {
         clipboardPaster.pasteText(snippet.content)
     }
 
-    private func registerClipboardHotKeys() {
+    private func registerReservedHotKeys() {
         do {
             try hotKeyCenter.replaceActions(with: [
                 HotKeyAction(hotKey: ReservedHotKeys.clipboardMenu) { [weak self] in
+                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.clipboardMenu.normalizedValue)` triggered clipboard menu.")
                     self?.clipboardMenuHandler?(.combined)
                 },
                 HotKeyAction(hotKey: ReservedHotKeys.snippetsMenu) { [weak self] in
+                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.snippetsMenu.normalizedValue)` triggered snippets menu.")
                     self?.clipboardMenuHandler?(.snippets)
                 },
             ])
+            console.info("Registered Carbon reserved hotkeys: \(Self.carbonReservedHotKeySummary()).")
         } catch {
-            let message = "Clipboard hotkey registration failed: \(error)"
+            let message = "Reserved hotkey registration failed: \(error)"
             console.error(message)
             publishStatus(message)
         }
+    }
+
+    private func startWindowSwitcherEventTap() {
+        guard windowSwitcherEventTap.start() else {
+            let message = "Window switcher unavailable. Allow Accessibility for Shorty, then restart."
+            console.error(message)
+            publishStatus(message)
+            requestPermissionPane(.accessibility)
+            return
+        }
+
+        console.info("Window switcher and window movement event tap installed.")
+    }
+
+    private func handleWindowSwitcherEvent(_ event: WindowSwitcherEvent) {
+        switch event {
+        case .advanceAllWindows:
+            advanceWindowSwitcher(mode: .allWindows, direction: .forward)
+        case .advanceCurrentApplication:
+            advanceWindowSwitcher(mode: .currentApplication, direction: .forward)
+        case .reverseActiveWindowSwitcher:
+            advanceWindowSwitcher(mode: activeWindowSwitcherMode ?? .allWindows, direction: .reverse)
+        case let .moveFocusedWindow(command, hotKey):
+            console.info("Event tap hotkey `\(hotKey)` triggered window move action.")
+            windowMover.moveFocusedWindow(command)
+        case .commandReleased:
+            commitWindowSwitcher()
+        case .cancel:
+            cancelWindowSwitcher()
+        }
+    }
+
+    private func advanceWindowSwitcher(mode: WindowSwitcherMode, direction: WindowSwitcherDirection) {
+        if activeWindowSwitcherMode != mode || activeWindowSwitcherSelection == nil {
+            startWindowSwitcher(mode: mode, initialDirection: direction)
+            return
+        }
+
+        activeWindowSwitcherSelection?.advance(direction)
+        publishWindowSwitcherUpdate(.update)
+    }
+
+    private func startWindowSwitcher(mode: WindowSwitcherMode, initialDirection: WindowSwitcherDirection) {
+        let windows: [SwitchableWindow]
+
+        switch mode {
+        case .allWindows:
+            windows = windowSwitchingIndex.allWindowsInMRUOrder()
+        case .currentApplication:
+            windows = windowSwitchingIndex.windowsForFrontmostApplicationInMRUOrder()
+        }
+
+        guard !windows.isEmpty else {
+            cancelWindowSwitcher()
+            return
+        }
+
+        activeWindowSwitcherMode = mode
+        activeWindowSwitcherWindows = windows
+        activeWindowSwitcherSelection = WindowSwitcherSessionState(
+            candidateCount: windows.count,
+            initialDirection: initialDirection
+        )
+        publishWindowSwitcherUpdate(.show)
+    }
+
+    private func commitWindowSwitcher() {
+        defer {
+            resetWindowSwitcher()
+            windowSwitcherHandler?(.hide)
+        }
+
+        guard let selectedWindow = currentWindowSwitcherSnapshot()?.selectedWindow else {
+            return
+        }
+
+        windowSwitchingIndex.markFocused(selectedWindow)
+        let result = windowActivator.activate(selectedWindow)
+        if !result.succeeded {
+            console.error(result.message)
+        }
+    }
+
+    private func cancelWindowSwitcher() {
+        resetWindowSwitcher()
+        windowSwitcherHandler?(.hide)
+    }
+
+    private enum WindowSwitcherPublishKind {
+        case show
+        case update
+    }
+
+    private func publishWindowSwitcherUpdate(_ kind: WindowSwitcherPublishKind) {
+        guard let snapshot = currentWindowSwitcherSnapshot() else {
+            return
+        }
+
+        switch kind {
+        case .show:
+            windowSwitcherHandler?(.show(snapshot))
+        case .update:
+            windowSwitcherHandler?(.update(snapshot))
+        }
+    }
+
+    private func currentWindowSwitcherSnapshot() -> WindowSwitcherSnapshot? {
+        guard let mode = activeWindowSwitcherMode, let selection = activeWindowSwitcherSelection else {
+            return nil
+        }
+
+        return WindowSwitcherSnapshot(
+            windows: activeWindowSwitcherWindows,
+            selectedIndex: selection.selectedIndex,
+            mode: mode
+        )
+    }
+
+    private func resetWindowSwitcher() {
+        activeWindowSwitcherMode = nil
+        activeWindowSwitcherWindows = []
+        activeWindowSwitcherSelection = nil
     }
 
     private func startWatchingConfig() {
@@ -130,5 +286,25 @@ public final class ShortyController {
 
     private func publishStatus(_ message: String) {
         statusHandler?(message)
+    }
+
+    private func requestPermissionPane(_ pane: ShortyPermissionPane) {
+        guard requestedPermissionPanes.insert(pane).inserted else {
+            return
+        }
+
+        permissionRequestHandler?(pane)
+    }
+
+    private static func carbonReservedHotKeySummary() -> String {
+        [
+            ReservedHotKeys.clipboardMenu,
+            ReservedHotKeys.snippetsMenu,
+        ]
+        .map { hotKey in
+            let description = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] ?? "reserved action"
+            return "\(hotKey.normalizedValue) (\(description))"
+        }
+        .joined(separator: ", ")
     }
 }

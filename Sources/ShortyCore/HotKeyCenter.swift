@@ -4,6 +4,7 @@ import Foundation
 public enum HotKeyCenterError: Error, CustomStringConvertible {
     case installHandlerFailed(OSStatus)
     case registerHotKeyFailed(String, OSStatus)
+    case registerHotKeyFailures([String])
 
     public var description: String {
         switch self {
@@ -11,6 +12,8 @@ public enum HotKeyCenterError: Error, CustomStringConvertible {
             return "Failed to install global hotkey handler: \(status)"
         case let .registerHotKeyFailed(hotkey, status):
             return "Failed to register hotkey `\(hotkey)`: \(status)"
+        case let .registerHotKeyFailures(failures):
+            return failures.joined(separator: "; ")
         }
     }
 }
@@ -55,10 +58,19 @@ public final class HotKeyCenter {
         unregisterActions()
         actionsByEventID.removeAll(keepingCapacity: true)
 
+        var failures: [String] = []
         for action in actions {
-            let registered = try register(action.hotKey)
-            registeredActionRefs.append(registered.reference)
-            actionsByEventID[registered.eventID] = action.handler
+            do {
+                let registered = try register(action.hotKey)
+                registeredActionRefs.append(registered.reference)
+                actionsByEventID[registered.eventID] = action.handler
+            } catch {
+                failures.append("\(action.hotKey.normalizedValue): \(error)")
+            }
+        }
+
+        if !failures.isEmpty {
+            throw HotKeyCenterError.registerHotKeyFailures(failures)
         }
     }
 
