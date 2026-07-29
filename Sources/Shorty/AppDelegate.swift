@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var popupModifierTracker = PopupModifierTracker { [weak self] in
         self?.pasteHighlightedClipboardItemAsPlainText() ?? false
     }
+    private let clipboardPickerPanel = ClipboardPickerPanelController()
+    private let commandPalettePanel = CommandPalettePanelController()
     private let windowSwitcherPanel = WindowSwitcherPanelController()
     private lazy var historyMenuIcon = Self.menuIcon(NSWorkspace.shared.icon(for: UTType.plainText))
     private lazy var snippetFolderMenuIcon: NSImage = {
@@ -46,8 +48,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         controller.clipboardMenuHandler = { [weak self] kind in
             DispatchQueue.main.async {
-                self?.showClipboardMenu(kind)
+                self?.handleClipboardMenuHotKey(kind)
             }
+        }
+        controller.textCommandHandler = { [weak self] in
+            DispatchQueue.main.async {
+                self?.showCommandPalette()
+            }
+        }
+        commandPalettePanel.pickerRequestHandler = { [weak self] kind in
+            self?.showCommandInsertionPicker(kind)
         }
         controller.windowSwitcherHandler = { [weak self] update in
             DispatchQueue.main.async {
@@ -65,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        clipboardPickerPanel.hide()
+        commandPalettePanel.hide()
         controller.stop()
     }
 
@@ -207,6 +219,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(url)
     }
 
+    private func showCommandPalette() {
+        commandPalettePanel.show()
+    }
+
+    private func handleClipboardMenuHotKey(_ kind: ClipboardMenuKind) {
+        if commandPalettePanel.requestNestedPickerFromHotKey(kind) {
+            return
+        }
+
+        showClipboardPicker(kind)
+    }
+
+    private func showCommandInsertionPicker(_ kind: ClipboardMenuKind) {
+        let mode: ClipboardPickerMode
+        switch kind {
+        case .combined:
+            mode = .all
+        case .snippets:
+            mode = .snippetsOnly
+        }
+
+        clipboardPickerPanel.show(
+            mode: mode,
+            history: controller.recentClipboardItems(),
+            snippetGroups: controller.currentSnippetGroups(),
+            onSelect: { [weak self] result, _ in
+                self?.commandPalettePanel.insertTextFromPicker(Self.text(for: result))
+            },
+            onCancel: { [weak self] in
+                self?.commandPalettePanel.cancelNestedPicker()
+            }
+        )
+    }
+
+    private static func text(for result: ClipboardPickerResult) -> String {
+        switch result {
+        case let .history(item):
+            return item.plainText
+        case let .snippet(_, snippet):
+            return snippet.content
+        }
+    }
+
     @objc
     private func showWindows() {
         let window = windowsWindow ?? makeWindowsWindow()
@@ -317,6 +372,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         popupModifierTracker.start()
         let anchorView = makePopupAnchorView(at: NSEvent.mouseLocation)
         popupMenu.popUp(positioning: Self.firstSelectableItem(in: popupMenu), at: .zero, in: anchorView)
+    }
+
+    private func showClipboardPicker(_ kind: ClipboardMenuKind) {
+        let mode: ClipboardPickerMode
+        switch kind {
+        case .combined:
+            mode = .all
+        case .snippets:
+            mode = .snippetsOnly
+        }
+
+        let targetApplication = Self.currentPasteTargetApplication()
+        clipboardPickerPanel.show(
+            mode: mode,
+            history: controller.recentClipboardItems(),
+            snippetGroups: controller.currentSnippetGroups(),
+            onSelect: { [weak self] result, forcePlainText in
+                self?.pastePickerResult(
+                    result,
+                    forcePlainText: forcePlainText,
+                    targetApplication: targetApplication
+                )
+            },
+            onCancel: {
+                Self.reactivate(targetApplication)
+            }
+        )
+    }
+
+    private func pastePickerResult(
+        _ result: ClipboardPickerResult,
+        forcePlainText: Bool,
+        targetApplication: NSRunningApplication?
+    ) {
+        Self.reactivate(targetApplication)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else {
+                return
+            }
+
+            switch result {
+            case let .history(item):
+                if forcePlainText {
+                    controller.pasteClipboardItemAsPlainText(item)
+                } else {
+                    controller.pasteClipboardItem(item)
+                }
+            case let .snippet(_, snippet):
+                controller.pasteSnippet(snippet)
+            }
+        }
+    }
+
+    private static func currentPasteTargetApplication() -> NSRunningApplication? {
+        let currentApplication = NSWorkspace.shared.frontmostApplication
+
+        guard currentApplication?.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return nil
+        }
+
+        return currentApplication
+    }
+
+    private static func reactivate(_ application: NSRunningApplication?) {
+        application?.activate(options: [.activateIgnoringOtherApps])
     }
 
     private func handleWindowSwitcherUpdate(_ update: WindowSwitcherUpdate) {

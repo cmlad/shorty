@@ -8,6 +8,7 @@ public enum ClipboardMenuKind: Sendable {
 public enum ReservedHotKeys {
     public static let clipboardMenu = try! KeyCombo.parse("cmd+shift+v")
     public static let snippetsMenu = try! KeyCombo.parse("cmd+shift+b")
+    public static let textCommand = try! KeyCombo.parse("option+space")
     public static let windowSwitcher = try! KeyCombo.parse("cmd+tab")
     public static let currentAppWindowSwitcher = try! KeyCombo.parse("cmd+grave")
     public static let moveWindowLeftHalf = try! KeyCombo.parse("ctrl+option+left")
@@ -19,6 +20,7 @@ public enum ReservedHotKeys {
     public static let descriptionsByNormalizedValue: [String: String] = [
         clipboardMenu.normalizedValue: "clipboard menu",
         snippetsMenu.normalizedValue: "snippets menu",
+        textCommand.normalizedValue: "text command palette",
         windowSwitcher.normalizedValue: "window switcher",
         currentAppWindowSwitcher.normalizedValue: "current-app window switcher",
         moveWindowLeftHalf.normalizedValue: "move-window-left-half action",

@@ -60,9 +60,11 @@ public enum WindowGeometryPlanner {
 
         let currentScreen = screens[currentIndex]
         let targetHalf: WindowHalf = direction == .left ? .left : .right
+        let targetFrame = halfFrame(on: currentScreen, half: targetHalf)
 
-        guard isApproximately(windowFrame, halfFrame(on: currentScreen, half: targetHalf), tolerance: tolerance) else {
-            return halfFrame(on: currentScreen, half: targetHalf)
+        guard isApproximately(windowFrame, targetFrame, tolerance: tolerance) ||
+            isApproximatelyAnchored(windowFrame, to: targetHalf, on: currentScreen, tolerance: tolerance) else {
+            return targetFrame
         }
 
         switch direction {
@@ -142,6 +144,42 @@ public enum WindowGeometryPlanner {
             abs(frame.height - target.height) <= tolerance
     }
 
+    public static func isApproximately(
+        _ point: CGPoint,
+        _ target: CGPoint,
+        tolerance: CGFloat = defaultTolerance
+    ) -> Bool {
+        abs(point.x - target.x) <= tolerance &&
+            abs(point.y - target.y) <= tolerance
+    }
+
+    public static func fittingOrigin(
+        for targetFrame: CGRect,
+        actualSize: CGSize,
+        screens: [CGRect]
+    ) -> CGPoint {
+        let screens = orderedScreens(screens)
+        guard let screenIndex = screenIndex(containing: targetFrame, screens: screens) else {
+            return targetFrame.standardized.origin
+        }
+
+        let targetFrame = targetFrame.standardized
+        let screen = screens[screenIndex]
+
+        return CGPoint(
+            x: clamp(
+                targetFrame.minX,
+                min: screen.minX,
+                max: screen.maxX - actualSize.width
+            ),
+            y: clamp(
+                targetFrame.minY,
+                min: screen.minY,
+                max: screen.maxY - actualSize.height
+            )
+        )
+    }
+
     private static func proportionalFrame(_ frame: CGRect, from source: CGRect, to destination: CGRect) -> CGRect {
         let source = source.standardized
         let destination = destination.standardized
@@ -167,6 +205,31 @@ public enum WindowGeometryPlanner {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
+    private static func isApproximatelyAnchored(
+        _ frame: CGRect,
+        to half: WindowHalf,
+        on screen: CGRect,
+        tolerance: CGFloat
+    ) -> Bool {
+        let frame = frame.standardized
+        let screen = screen.standardized
+        let target = halfFrame(on: screen, half: half)
+
+        guard frame.width > target.width + tolerance,
+              frame.width < screen.width - tolerance,
+              abs(frame.minY - screen.minY) <= tolerance,
+              abs(frame.height - screen.height) <= tolerance else {
+            return false
+        }
+
+        switch half {
+        case .left:
+            return abs(frame.minX - screen.minX) <= tolerance
+        case .right:
+            return abs(frame.maxX - screen.maxX) <= tolerance
+        }
+    }
+
     private static func intersectionArea(_ first: CGRect, _ second: CGRect) -> CGFloat {
         let intersection = first.intersection(second)
         guard !intersection.isNull else {
@@ -177,6 +240,10 @@ public enum WindowGeometryPlanner {
     }
 
     private static func clamp(_ value: CGFloat, min minimum: CGFloat, max maximum: CGFloat) -> CGFloat {
-        Swift.min(Swift.max(value, minimum), maximum)
+        guard maximum >= minimum else {
+            return minimum
+        }
+
+        return Swift.min(Swift.max(value, minimum), maximum)
     }
 }

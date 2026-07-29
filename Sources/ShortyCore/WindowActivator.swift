@@ -47,6 +47,10 @@ public final class WindowActivator {
 
     @discardableResult
     public func activate(_ shortcut: LoadedShortcut) -> ActivationResult {
+        if shortcut.matcher.usesApplicationActivation {
+            return activateApplication(for: shortcut)
+        }
+
         if let cachedTarget = cachedMatch(for: shortcut) {
             return activateResolvedWindow(cachedTarget, for: shortcut)
         }
@@ -64,10 +68,68 @@ public final class WindowActivator {
         let target = matches[shortcut.matcher.windowIndex]
         cachedTargetsByShortcutID[shortcut.id] = CachedWindowTarget(
             pid: target.app.processIdentifier,
-            window: target.window,
-            appWindowIndex: target.appWindowIndex
+            window: target.window
         )
         return activateResolvedWindow(target, for: shortcut)
+    }
+
+    private func activateApplication(for shortcut: LoadedShortcut) -> ActivationResult {
+        guard let app = candidateApplications(for: shortcut.matcher).first else {
+            let message = "No application matched `\(shortcut.id)`."
+            console.error(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        if app.isHidden {
+            app.unhide()
+        }
+
+        let windowToRestore = minimizedWindowToRestoreIfNeeded(for: app)
+        if let windowToRestore {
+            Self.setBoolAttribute(false, attribute: kAXMinimizedAttribute as CFString, on: windowToRestore)
+        }
+
+        let succeeded = app.activate(options: [.activateIgnoringOtherApps])
+        if let windowToRestore {
+            Self.focus(windowToRestore)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                Self.setBoolAttribute(false, attribute: kAXMinimizedAttribute as CFString, on: windowToRestore)
+                Self.focus(windowToRestore)
+            }
+        }
+
+        let appName = app.localizedName ?? shortcut.id
+        let message = succeeded
+            ? "Activated \(appName) for shortcut `\(shortcut.id)`."
+            : "Failed to activate \(appName) for shortcut `\(shortcut.id)`."
+
+        if succeeded {
+            console.info(message)
+        } else {
+            console.error(message)
+        }
+
+        return ActivationResult(succeeded: succeeded, message: message)
+    }
+
+    private func minimizedWindowToRestoreIfNeeded(for app: NSRunningApplication) -> AXUIElement? {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        let currentWindows = windows(for: appElement)
+        var firstMinimizedWindow: AXUIElement?
+
+        for window in currentWindows {
+            guard let minimized = boolAttribute(kAXMinimizedAttribute as CFString, on: window) else {
+                return nil
+            }
+
+            if minimized {
+                firstMinimizedWindow = firstMinimizedWindow ?? window
+            } else {
+                return nil
+            }
+        }
+
+        return firstMinimizedWindow
     }
 
     public func listWindows() -> [WindowDescriptor] {
@@ -148,7 +210,8 @@ public final class WindowActivator {
             return nil
         }
 
-        guard attributeExists(kAXRoleAttribute as CFString, on: cachedTarget.window) else {
+        let currentWindows = windows(for: AXUIElementCreateApplication(app.processIdentifier))
+        guard let currentWindowIndex = currentWindows.firstIndex(where: { CFEqual($0, cachedTarget.window) }) else {
             cachedTargetsByShortcutID.removeValue(forKey: shortcut.id)
             return nil
         }
@@ -157,7 +220,7 @@ public final class WindowActivator {
         let snapshot = snapshotWindow(
             cachedTarget.window,
             app: app,
-            appWindowIndex: cachedTarget.appWindowIndex,
+            appWindowIndex: currentWindowIndex,
             detail: detail
         )
 
@@ -315,11 +378,12 @@ public final class WindowActivator {
             target.app.unhide()
         }
 
-        setBoolAttribute(false, attribute: kAXMinimizedAttribute as CFString, on: target.window)
+        Self.setBoolAttribute(false, attribute: kAXMinimizedAttribute as CFString, on: target.window)
         target.app.activate(options: [.activateIgnoringOtherApps])
         Self.focus(target.window)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            Self.setBoolAttribute(false, attribute: kAXMinimizedAttribute as CFString, on: target.window)
             Self.focus(target.window)
         }
 
@@ -406,7 +470,7 @@ public final class WindowActivator {
         return size
     }
 
-    private func setBoolAttribute(_ value: Bool, attribute: CFString, on element: AXUIElement) {
+    private static func setBoolAttribute(_ value: Bool, attribute: CFString, on element: AXUIElement) {
         let boolValue: CFBoolean = value ? kCFBooleanTrue : kCFBooleanFalse
         _ = AXUIElementSetAttributeValue(element, attribute, boolValue)
     }
@@ -453,7 +517,6 @@ private struct WindowEnumerationDetail {
 private struct CachedWindowTarget {
     let pid: pid_t
     let window: AXUIElement
-    let appWindowIndex: Int
 }
 
 private struct MatchedWindow {

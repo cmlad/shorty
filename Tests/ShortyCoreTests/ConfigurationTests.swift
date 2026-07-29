@@ -129,6 +129,26 @@ final class ConfigurationTests: XCTestCase {
         }
     }
 
+    func testRejectsReservedTextCommandHotkey() throws {
+        let hotkeys = ["alt+space", "option+space"]
+
+        for hotkey in hotkeys {
+            let url = try temporaryConfigURL(
+                extension: "yaml",
+                contents: """
+                shortcuts:
+                  reserved:
+                    hotkey: \(hotkey)
+                    bundle-id: com.microsoft.VSCode
+                """
+            )
+
+            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to be reserved") { error in
+                XCTAssertTrue(String(describing: error).contains("reserved"))
+            }
+        }
+    }
+
     func testRejectsReservedWindowSwitcherHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
@@ -229,6 +249,50 @@ final class ConfigurationTests: XCTestCase {
                 executablePath: "/Applications/CursorXapp/Contents/MacOS/Cursor"
             )
         )
+    }
+
+    func testAppOnlyMatcherUsesApplicationActivation() throws {
+        let matcher = WindowMatcher(
+            bundleID: "com.mitchellh.ghostty",
+            appNameRegex: nil,
+            executablePathPrefix: nil,
+            titleRegex: nil,
+            titleContains: nil,
+            documentRegex: nil,
+            urlRegex: nil,
+            identifierRegex: nil,
+            windowIndex: 0
+        )
+
+        XCTAssertTrue(matcher.usesApplicationActivation)
+    }
+
+    func testWindowSpecificMatcherDoesNotUseApplicationActivation() throws {
+        let titleMatcher = WindowMatcher(
+            bundleID: "com.mitchellh.ghostty",
+            appNameRegex: nil,
+            executablePathPrefix: nil,
+            titleRegex: nil,
+            titleContains: "project",
+            documentRegex: nil,
+            urlRegex: nil,
+            identifierRegex: nil,
+            windowIndex: 0
+        )
+        let indexMatcher = WindowMatcher(
+            bundleID: "com.mitchellh.ghostty",
+            appNameRegex: nil,
+            executablePathPrefix: nil,
+            titleRegex: nil,
+            titleContains: nil,
+            documentRegex: nil,
+            urlRegex: nil,
+            identifierRegex: nil,
+            windowIndex: 1
+        )
+
+        XCTAssertFalse(titleMatcher.usesApplicationActivation)
+        XCTAssertFalse(indexMatcher.usesApplicationActivation)
     }
 
     func testRejectsDuplicateHotkeys() throws {

@@ -62,20 +62,13 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
 
     public func menuTitle(maxLength: Int = ClipboardConstants.maxMenuItemTitleLength) -> String {
         let lines = plainText.components(separatedBy: .newlines)
-        let firstLine = lines.first ?? ""
-        let title: String
+        let titleLineIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? 0
+        let title = lines.indices.contains(titleLineIndex) ? lines[titleLineIndex] : ""
+        let additionalLineCount = max(0, lines.count - titleLineIndex - 1)
+        let suffix = additionalLineCount > 0 ? " +\(additionalLineCount)" : ""
+        let contentMaxLength = max(1, maxLength - suffix.count)
 
-        if firstLine.isEmpty {
-            if let firstNonBlankLine = lines.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                title = "> \(firstNonBlankLine)"
-            } else {
-                title = "> "
-            }
-        } else {
-            title = firstLine
-        }
-
-        return title.shortyTruncated(maxLength: maxLength)
+        return title.shortyTruncated(maxLength: contentMaxLength) + suffix
     }
 
     private static func firstString(from pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> String? {
@@ -239,6 +232,7 @@ public enum ClipboardConstants {
     public static let overflowSubmenuSize = 20
     public static let maxOverflowSubmenus = 9
     public static let maxMenuItemTitleLength = 60
+    public static let maxPickerItemTitleLength = 240
     public static let maxTooltipLength = 500
     public static let pollInterval: TimeInterval = 0.75
 }
@@ -286,6 +280,14 @@ public final class ClipboardHistoryStore {
         }
 
         save()
+    }
+
+    public func addPlainText(_ text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        add(ClipboardItem(plainText: text))
     }
 
     public func recentItems(limit: Int = ClipboardConstants.maxVisibleItems) -> [ClipboardItem] {

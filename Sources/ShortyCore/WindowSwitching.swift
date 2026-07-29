@@ -12,6 +12,7 @@ public enum WindowSwitcherEvent: Sendable {
     case advanceAllWindows
     case advanceCurrentApplication
     case reverseActiveWindowSwitcher
+    case reverseCurrentApplication
     case moveFocusedWindow(WindowMoveCommand, String)
     case commandReleased
     case cancel
@@ -691,7 +692,7 @@ public final class WindowSwitcherEventTap {
 
         if keyCode == UInt32(kVK_ANSI_Grave) {
             isSwitching = true
-            handler(.advanceCurrentApplication)
+            handler(flags.contains(.maskShift) ? .reverseCurrentApplication : .advanceCurrentApplication)
             return nil
         }
 

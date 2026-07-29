@@ -68,6 +68,42 @@ final class WindowGeometryPlannerTests: XCTestCase {
         )
     }
 
+    func testHalfCycleTreatsOversizedLeftAnchoredWindowAsLeftHalf() {
+        let screens = [
+            CGRect(x: 0, y: 0, width: 1000, height: 800),
+            CGRect(x: 1000, y: 0, width: 1200, height: 900),
+        ]
+        let window = CGRect(x: 0, y: 0, width: 700, height: 800)
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.halfCycleFrame(for: window, screens: screens, direction: .left),
+            CGRect(x: 1600, y: 0, width: 600, height: 900)
+        )
+    }
+
+    func testHalfCycleTreatsOversizedRightAnchoredWindowAsRightHalf() {
+        let screens = [
+            CGRect(x: 0, y: 0, width: 1000, height: 800),
+            CGRect(x: 1000, y: 0, width: 1200, height: 900),
+        ]
+        let window = CGRect(x: 300, y: 0, width: 700, height: 800)
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.halfCycleFrame(for: window, screens: screens, direction: .right),
+            CGRect(x: 1000, y: 0, width: 600, height: 900)
+        )
+    }
+
+    func testHalfCycleDoesNotTreatMaximizedWindowAsAnchoredHalf() {
+        let screens = [CGRect(x: 0, y: 0, width: 1000, height: 800)]
+        let window = CGRect(x: 0, y: 0, width: 1000, height: 800)
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.halfCycleFrame(for: window, screens: screens, direction: .right),
+            CGRect(x: 500, y: 0, width: 500, height: 800)
+        )
+    }
+
     func testApproximatelyUsesToleranceForHalfDetection() {
         let target = CGRect(x: 0, y: 0, width: 500, height: 800)
 
@@ -82,6 +118,23 @@ final class WindowGeometryPlannerTests: XCTestCase {
             WindowGeometryPlanner.isApproximately(
                 CGRect(x: 20, y: 0, width: 500, height: 800),
                 target,
+                tolerance: 12
+            )
+        )
+    }
+
+    func testApproximatelyUsesToleranceForPoints() {
+        XCTAssertTrue(
+            WindowGeometryPlanner.isApproximately(
+                CGPoint(x: 108, y: 46),
+                CGPoint(x: 100, y: 50),
+                tolerance: 12
+            )
+        )
+        XCTAssertFalse(
+            WindowGeometryPlanner.isApproximately(
+                CGPoint(x: 120, y: 50),
+                CGPoint(x: 100, y: 50),
                 tolerance: 12
             )
         )
@@ -120,6 +173,45 @@ final class WindowGeometryPlannerTests: XCTestCase {
                 displayBounds: displayBounds
             ),
             CGRect(x: 1000, y: 20, width: 1200, height: 830)
+        )
+    }
+
+    func testFittingOriginKeepsTargetOriginWhenActualSizeFitsScreen() {
+        let screens = [CGRect(x: 0, y: 0, width: 1000, height: 800)]
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.fittingOrigin(
+                for: CGRect(x: 500, y: 0, width: 500, height: 800),
+                actualSize: CGSize(width: 480, height: 700),
+                screens: screens
+            ),
+            CGPoint(x: 500, y: 0)
+        )
+    }
+
+    func testFittingOriginClampsOversizedRightHalfWindowToScreenEdge() {
+        let screens = [CGRect(x: 0, y: 0, width: 1000, height: 800)]
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.fittingOrigin(
+                for: CGRect(x: 500, y: 0, width: 500, height: 800),
+                actualSize: CGSize(width: 700, height: 760),
+                screens: screens
+            ),
+            CGPoint(x: 300, y: 0)
+        )
+    }
+
+    func testFittingOriginUsesScreenMinimumWhenWindowIsLargerThanScreen() {
+        let screens = [CGRect(x: 100, y: 50, width: 1000, height: 800)]
+
+        XCTAssertEqual(
+            WindowGeometryPlanner.fittingOrigin(
+                for: CGRect(x: 600, y: 50, width: 500, height: 800),
+                actualSize: CGSize(width: 1200, height: 900),
+                screens: screens
+            ),
+            CGPoint(x: 100, y: 50)
         )
     }
 

@@ -310,7 +310,7 @@ private final class WindowSwitcherPanel: NSObject, NSTableViewDataSource, NSTabl
                 NSAttributedString(
                     string: shortcutName,
                     attributes: [
-                        .font: NSFont.systemFont(ofSize: 13),
+                        .font: NSFont.boldSystemFont(ofSize: 13),
                         .foregroundColor: NSColor.white,
                         .paragraphStyle: paragraphStyle,
                     ]

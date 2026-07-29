@@ -10,6 +10,7 @@ public final class ShortyController {
     public let options: LaunchOptions
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
+    public var textCommandHandler: (() -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
@@ -31,6 +32,7 @@ public final class ShortyController {
     private var activeWindowSwitcherWindows: [SwitchableWindow] = []
     private var activeWindowSwitcherSelection: WindowSwitcherSessionState?
     private var requestedPermissionPanes: Set<ShortyPermissionPane> = []
+    private var lastWindowMoveAction: (hotKey: String, date: Date)?
 
     public init(
         options: LaunchOptions,
@@ -122,15 +124,18 @@ public final class ShortyController {
 
     public func pasteClipboardItem(_ item: ClipboardItem) {
         console.info("Pasting clipboard history item with rich representations.")
+        clipboardHistoryStore.add(item)
         clipboardPaster.paste(item)
     }
 
     public func pasteClipboardItemAsPlainText(_ item: ClipboardItem) {
         console.info("Pasting clipboard history item as plain text.")
+        clipboardHistoryStore.add(item)
         clipboardPaster.pasteText(item.plainText)
     }
 
     public func pasteSnippet(_ snippet: Snippet) {
+        clipboardHistoryStore.addPlainText(snippet.content)
         clipboardPaster.pasteText(snippet.content)
     }
 
@@ -144,6 +149,25 @@ public final class ShortyController {
                 HotKeyAction(hotKey: ReservedHotKeys.snippetsMenu) { [weak self] in
                     self?.console.info("Reserved hotkey `\(ReservedHotKeys.snippetsMenu.normalizedValue)` triggered snippets menu.")
                     self?.clipboardMenuHandler?(.snippets)
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.textCommand) { [weak self] in
+                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.textCommand.normalizedValue)` triggered text command palette.")
+                    self?.textCommandHandler?()
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.moveWindowLeftHalf) { [weak self] in
+                    self?.moveFocusedWindow(.cycleHalf(.left), hotKey: ReservedHotKeys.moveWindowLeftHalf.normalizedValue)
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.moveWindowRightHalf) { [weak self] in
+                    self?.moveFocusedWindow(.cycleHalf(.right), hotKey: ReservedHotKeys.moveWindowRightHalf.normalizedValue)
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.maximizeWindow) { [weak self] in
+                    self?.moveFocusedWindow(.maximize, hotKey: ReservedHotKeys.maximizeWindow.normalizedValue)
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.moveWindowToLeftMonitor) { [weak self] in
+                    self?.moveFocusedWindow(.moveToMonitor(.left), hotKey: ReservedHotKeys.moveWindowToLeftMonitor.normalizedValue)
+                },
+                HotKeyAction(hotKey: ReservedHotKeys.moveWindowToRightMonitor) { [weak self] in
+                    self?.moveFocusedWindow(.moveToMonitor(.right), hotKey: ReservedHotKeys.moveWindowToRightMonitor.normalizedValue)
                 },
             ])
             console.info("Registered Carbon reserved hotkeys: \(Self.carbonReservedHotKeySummary()).")
@@ -163,7 +187,7 @@ public final class ShortyController {
             return
         }
 
-        console.info("Window switcher and window movement event tap installed.")
+        console.info("Window switcher event tap installed.")
     }
 
     private func handleWindowSwitcherEvent(_ event: WindowSwitcherEvent) {
@@ -174,14 +198,29 @@ public final class ShortyController {
             advanceWindowSwitcher(mode: .currentApplication, direction: .forward)
         case .reverseActiveWindowSwitcher:
             advanceWindowSwitcher(mode: activeWindowSwitcherMode ?? .allWindows, direction: .reverse)
+        case .reverseCurrentApplication:
+            advanceWindowSwitcher(mode: .currentApplication, direction: .reverse)
         case let .moveFocusedWindow(command, hotKey):
-            console.info("Event tap hotkey `\(hotKey)` triggered window move action.")
-            windowMover.moveFocusedWindow(command)
+            moveFocusedWindow(command, hotKey: hotKey)
         case .commandReleased:
             commitWindowSwitcher()
         case .cancel:
             cancelWindowSwitcher()
         }
+    }
+
+    private func moveFocusedWindow(_ command: WindowMoveCommand, hotKey: String) {
+        let now = Date()
+        if let lastWindowMoveAction,
+           lastWindowMoveAction.hotKey == hotKey,
+           now.timeIntervalSince(lastWindowMoveAction.date) < 0.08 {
+            return
+        }
+
+        lastWindowMoveAction = (hotKey, now)
+        console.info("Reserved hotkey `\(hotKey)` triggered window move action.")
+        let result = windowMover.moveFocusedWindow(command)
+        publishStatus(result.message)
     }
 
     private func advanceWindowSwitcher(mode: WindowSwitcherMode, direction: WindowSwitcherDirection) {
@@ -300,6 +339,12 @@ public final class ShortyController {
         [
             ReservedHotKeys.clipboardMenu,
             ReservedHotKeys.snippetsMenu,
+            ReservedHotKeys.textCommand,
+            ReservedHotKeys.moveWindowLeftHalf,
+            ReservedHotKeys.moveWindowRightHalf,
+            ReservedHotKeys.maximizeWindow,
+            ReservedHotKeys.moveWindowToLeftMonitor,
+            ReservedHotKeys.moveWindowToRightMonitor,
         ]
         .map { hotKey in
             let description = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] ?? "reserved action"

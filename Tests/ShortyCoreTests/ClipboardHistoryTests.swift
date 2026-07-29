@@ -27,6 +27,23 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertEqual(reloadedStore.recentItems().map(\.plainText), ["Persisted"])
     }
 
+    func testStoreAddsPlainTextPasteToHistory() throws {
+        let store = ClipboardHistoryStore(url: try temporaryHistoryURL(), maxStoredItems: 2)
+
+        store.add(ClipboardItem(plainText: "Existing"))
+        store.addPlainText("Snippet content")
+
+        XCTAssertEqual(store.recentItems().map(\.plainText), ["Snippet content", "Existing"])
+    }
+
+    func testStoreDoesNotAddWhitespaceOnlyPlainTextPaste() throws {
+        let store = ClipboardHistoryStore(url: try temporaryHistoryURL(), maxStoredItems: 2)
+
+        store.addPlainText(" \n\t  ")
+
+        XCTAssertEqual(store.recentItems(), [])
+    }
+
     func testReadsAndRestoresRTFClipboardItem() throws {
         let pasteboard = uniquePasteboard()
         let rtfData = try makeRTFData("Rich text")
@@ -134,10 +151,24 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertTrue(title.hasSuffix("..."))
     }
 
-    func testMenuTitleUsesFirstNonBlankLineWhenFirstLineIsBlank() {
+    func testMenuTitleUsesFirstNonBlankLineWithoutPrefixWhenFirstLineIsBlank() {
         let item = ClipboardItem(plainText: "\n\n  First content line\nSecond line")
 
-        XCTAssertEqual(item.menuTitle(), ">   First content line")
+        XCTAssertEqual(item.menuTitle(), "  First content line +1")
+    }
+
+    func testMenuTitleShowsAdditionalLineCountAndPreservesCutoffForMultilineText() {
+        let item = ClipboardItem(plainText: String(repeating: "a", count: 100) + "\nSecond line")
+        let title = item.menuTitle()
+
+        XCTAssertEqual(title.count, ClipboardConstants.maxMenuItemTitleLength)
+        XCTAssertTrue(title.hasSuffix("... +1"))
+    }
+
+    func testMenuTitleCountsMultipleAdditionalLines() {
+        let item = ClipboardItem(plainText: "First\nSecond\nThird\nFourth\nFifth\nSixth")
+
+        XCTAssertEqual(item.menuTitle(), "First +5")
     }
 
     private func uniquePasteboard() -> NSPasteboard {

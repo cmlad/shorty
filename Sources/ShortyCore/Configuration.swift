@@ -232,6 +232,15 @@ public struct WindowMatcher {
     public let identifierRegex: NSRegularExpression?
     public let windowIndex: Int
 
+    public var usesApplicationActivation: Bool {
+        titleRegex == nil &&
+            titleContains == nil &&
+            documentRegex == nil &&
+            urlRegex == nil &&
+            identifierRegex == nil &&
+            windowIndex == 0
+    }
+
     public func matches(
         app: NSRunningApplication,
         title: String,
