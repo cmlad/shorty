@@ -3,12 +3,6 @@ import Carbon
 import ShortyCore
 import UniformTypeIdentifiers
 
-enum ClipboardPickerActivationMode {
-    case standard
-    case plainText
-    case joinedLines
-}
-
 @MainActor
 final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Metrics {
@@ -532,15 +526,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     }
 
     fileprivate static func activationMode(event: NSEvent? = nil) -> ClipboardPickerActivationMode {
-        if shiftModifierIsActive(event: event) {
-            return .joinedLines
-        }
-
-        if commandModifierIsActive(event: event) {
-            return .plainText
-        }
-
-        return .standard
+        ClipboardPickerActivationMode.fromModifiers(
+            command: commandModifierIsActive(event: event),
+            shift: shiftModifierIsActive(event: event)
+        )
     }
 
     fileprivate static func shiftModifierIsActive(event: NSEvent? = nil) -> Bool {

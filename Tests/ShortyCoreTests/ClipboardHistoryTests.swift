@@ -232,6 +232,12 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertTrue(title.hasSuffix("... +1"))
     }
 
+    func testMenuTitleCountsCRLFAsSingleLineBreak() {
+        let item = ClipboardItem(plainText: "First\r\nSecond\r\nThird")
+
+        XCTAssertEqual(item.menuTitle(), "First +2")
+    }
+
     func testMenuTitleCountsMultipleAdditionalLines() {
         let item = ClipboardItem(plainText: "First\nSecond\nThird\nFourth\nFifth\nSixth")
 
