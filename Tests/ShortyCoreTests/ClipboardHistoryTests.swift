@@ -44,6 +44,92 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertEqual(store.recentItems(), [])
     }
 
+    func testJoinedTrimmedNonEmptyLinesTrimsDropsEmptyLinesAndConcatenates() {
+        let text = "  alpha  \n\t\n beta\t \n  gamma delta  "
+
+        XCTAssertEqual(ClipboardItem.joinedTrimmedNonEmptyLines(from: text), "alphabetagamma delta")
+    }
+
+    func testJoinedTrimmedNonEmptyLinesHandlesCRLFAndStandaloneNewlines() {
+        let text = " one \r\n two \r three \n\n four "
+
+        XCTAssertEqual(ClipboardItem.joinedTrimmedNonEmptyLines(from: text), "onetwothreefour")
+    }
+
+    func testJoinedTrimmedNonEmptyLinesPreservesInternalWhitespaceOnSingleLine() {
+        let text = "  alpha  beta  "
+
+        XCTAssertEqual(ClipboardItem.joinedTrimmedNonEmptyLines(from: text), "alpha  beta")
+    }
+
+    func testStoreAddsJoinedTrimmedTextAsPlainNewestItemAndPreservesOriginal() throws {
+        let store = ClipboardHistoryStore(url: try temporaryHistoryURL(), maxStoredItems: 3)
+        let richOriginal = ClipboardItem(
+            plainText: "  Alpha  \n\n Beta ",
+            rtfData: try makeRTFData("  Alpha  \n\n Beta "),
+            additionalRepresentations: [
+                ClipboardRepresentation(type: "com.apple.notes.richtext", data: Data("rich".utf8)),
+            ]
+        )
+
+        store.add(ClipboardItem(plainText: "Older"))
+        store.add(richOriginal)
+        let transformedText = store.addJoinedTrimmedNonEmptyLines(from: richOriginal)
+        let items = store.recentItems()
+
+        XCTAssertEqual(transformedText, "AlphaBeta")
+        XCTAssertEqual(items.map(\.plainText), ["AlphaBeta", richOriginal.plainText, "Older"])
+        XCTAssertNil(items[0].rtfData)
+        XCTAssertNil(items[0].rtfdData)
+        XCTAssertEqual(items[0].additionalRepresentations, [])
+        XCTAssertEqual(items[1].id, richOriginal.id)
+        XCTAssertEqual(items[1].plainText, richOriginal.plainText)
+        XCTAssertEqual(items[1].rtfData, richOriginal.rtfData)
+        XCTAssertEqual(items[1].additionalRepresentations, richOriginal.additionalRepresentations)
+    }
+
+    func testStoreAddsEmptyJoinedTrimmedTextAsPlainNewestItem() throws {
+        let store = ClipboardHistoryStore(url: try temporaryHistoryURL(), maxStoredItems: 2)
+        let richOriginal = ClipboardItem(
+            plainText: " \n\t\r\n ",
+            rtfData: try makeRTFData(" \n\t\r\n ")
+        )
+
+        store.add(richOriginal)
+        let transformedText = store.addJoinedTrimmedNonEmptyLines(from: richOriginal)
+        let items = store.recentItems()
+
+        XCTAssertEqual(transformedText, "")
+        XCTAssertEqual(items.map(\.plainText), ["", richOriginal.plainText])
+        XCTAssertNil(items[0].rtfData)
+        XCTAssertNil(items[0].rtfdData)
+        XCTAssertEqual(items[0].additionalRepresentations, [])
+        XCTAssertEqual(items[1].id, richOriginal.id)
+    }
+
+    func testCopyJoinedTrimmedTextToPasteboardOmitsRichRepresentations() throws {
+        let pasteboard = uniquePasteboard()
+        let notesType = NSPasteboard.PasteboardType("com.apple.notes.richtext")
+        let richOriginal = ClipboardItem(
+            plainText: "  Alpha  \n\n Beta ",
+            rtfData: try makeRTFData("  Alpha  \n\n Beta "),
+            additionalRepresentations: [
+                ClipboardRepresentation(type: notesType.rawValue, data: Data("rich".utf8)),
+            ]
+        )
+        let paster = ClipboardPaster(pasteboard: pasteboard)
+
+        paster.copyToPasteboard(richOriginal)
+        XCTAssertNotNil(pasteboard.data(forType: .rtf))
+        XCTAssertNotNil(pasteboard.data(forType: notesType))
+
+        paster.copyTextToPasteboard(richOriginal.joinedTrimmedNonEmptyLines)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "AlphaBeta")
+        XCTAssertNil(pasteboard.data(forType: .rtf))
+        XCTAssertNil(pasteboard.data(forType: notesType))
+    }
+
     func testReadsAndRestoresRTFClipboardItem() throws {
         let pasteboard = uniquePasteboard()
         let rtfData = try makeRTFData("Rich text")
@@ -163,6 +249,12 @@ final class ClipboardHistoryTests: XCTestCase {
 
         XCTAssertEqual(title.count, ClipboardConstants.maxMenuItemTitleLength)
         XCTAssertTrue(title.hasSuffix("... +1"))
+    }
+
+    func testMenuTitleCountsCRLFAsSingleLineBreak() {
+        let item = ClipboardItem(plainText: "First\r\nSecond\r\nThird")
+
+        XCTAssertEqual(item.menuTitle(), "First +2")
     }
 
     func testMenuTitleCountsMultipleAdditionalLines() {

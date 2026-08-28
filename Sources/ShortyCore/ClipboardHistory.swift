@@ -60,15 +60,82 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         )
     }
 
+    public static func joinedTrimmedNonEmptyLines(from text: String) -> String {
+        lineComponents(in: text)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined()
+    }
+
+    public var joinedTrimmedNonEmptyLines: String {
+        Self.joinedTrimmedNonEmptyLines(from: plainText)
+    }
+
     public func menuTitle(maxLength: Int = ClipboardConstants.maxMenuItemTitleLength) -> String {
-        let lines = plainText.components(separatedBy: .newlines)
-        let titleLineIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? 0
-        let title = lines.indices.contains(titleLineIndex) ? lines[titleLineIndex] : ""
-        let additionalLineCount = max(0, lines.count - titleLineIndex - 1)
+        let preview = linePreview()
+        let title = preview.title
+        let additionalLineCount = preview.additionalLineCount
         let suffix = additionalLineCount > 0 ? " +\(additionalLineCount)" : ""
         let contentMaxLength = max(1, maxLength - suffix.count)
 
         return title.shortyTruncated(maxLength: contentMaxLength) + suffix
+    }
+
+    func pickerLinePreview(maxTitleLength: Int = ClipboardConstants.maxPickerItemTitleLength) -> ClipboardLinePreview {
+        let preview = linePreview()
+        return ClipboardLinePreview(
+            title: preview.title.shortyTruncated(maxLength: maxTitleLength),
+            additionalLineCount: preview.additionalLineCount
+        )
+    }
+
+    private func linePreview() -> ClipboardLinePreview {
+        let lines = Self.lineComponents(in: plainText)
+        let titleLineIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? 0
+        let title = lines.indices.contains(titleLineIndex) ? lines[titleLineIndex] : ""
+        let additionalLineCount = max(0, lines.count - titleLineIndex - 1)
+
+        return ClipboardLinePreview(title: title, additionalLineCount: additionalLineCount)
+    }
+
+    private static func lineComponents(in text: String) -> [String] {
+        var lines: [String] = []
+        var currentLine = String.UnicodeScalarView()
+        var index = text.unicodeScalars.startIndex
+
+        while index < text.unicodeScalars.endIndex {
+            let scalar = text.unicodeScalars[index]
+            if scalar == "\r" {
+                lines.append(String(currentLine))
+                currentLine.removeAll(keepingCapacity: true)
+                index = text.unicodeScalars.index(after: index)
+                if index < text.unicodeScalars.endIndex, text.unicodeScalars[index] == "\n" {
+                    index = text.unicodeScalars.index(after: index)
+                }
+                continue
+            }
+
+            if Self.isNonCarriageReturnNewline(scalar) {
+                lines.append(String(currentLine))
+                currentLine.removeAll(keepingCapacity: true)
+            } else {
+                currentLine.append(scalar)
+            }
+
+            index = text.unicodeScalars.index(after: index)
+        }
+
+        lines.append(String(currentLine))
+        return lines
+    }
+
+    private static func isNonCarriageReturnNewline(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "\n" ||
+            scalar == "\u{000B}" ||
+            scalar == "\u{000C}" ||
+            scalar == "\u{0085}" ||
+            scalar == "\u{2028}" ||
+            scalar == "\u{2029}"
     }
 
     private static func firstString(from pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> String? {
@@ -215,6 +282,15 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+struct ClipboardLinePreview: Equatable, Sendable {
+    let title: String
+    let additionalLineCount: Int
+
+    var trailingLineCountLabel: String? {
+        additionalLineCount > 0 ? "+\(additionalLineCount)" : nil
+    }
+}
+
 public struct ClipboardRepresentation: Codable, Equatable, Sendable {
     public let type: String
     public let data: Data
@@ -288,6 +364,13 @@ public final class ClipboardHistoryStore {
         }
 
         add(ClipboardItem(plainText: text))
+    }
+
+    @discardableResult
+    public func addJoinedTrimmedNonEmptyLines(from item: ClipboardItem) -> String {
+        let text = item.joinedTrimmedNonEmptyLines
+        add(ClipboardItem(plainText: text))
+        return text
     }
 
     public func recentItems(limit: Int = ClipboardConstants.maxVisibleItems) -> [ClipboardItem] {

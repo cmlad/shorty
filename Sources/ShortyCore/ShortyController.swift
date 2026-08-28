@@ -134,6 +134,12 @@ public final class ShortyController {
         clipboardPaster.pasteText(item.plainText)
     }
 
+    public func pasteClipboardItemByJoiningTrimmedNonEmptyLines(_ item: ClipboardItem) {
+        console.info("Pasting clipboard history item with trimmed lines joined.")
+        let text = clipboardHistoryStore.addJoinedTrimmedNonEmptyLines(from: item)
+        clipboardPaster.pasteText(text)
+    }
+
     public func pasteSnippet(_ snippet: Snippet) {
         clipboardHistoryStore.addPlainText(snippet.content)
         clipboardPaster.pasteText(snippet.content)

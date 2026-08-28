@@ -53,7 +53,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private var query = ""
     private var entries: [ClipboardPickerEntry] = []
     private var selectedIndex = -1
-    private var onSelect: ((ClipboardPickerResult, Bool) -> Void)?
+    private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
@@ -84,7 +84,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         mode: ClipboardPickerMode,
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
-        onSelect: @escaping (ClipboardPickerResult, Bool) -> Void,
+        onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.mode = mode
@@ -224,8 +224,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         tableView.keyHandler = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }
-        tableView.mouseSelectionHandler = { [weak self] row, forcePlainText in
-            self?.activate(row: row, forcePlainText: forcePlainText)
+        tableView.mouseSelectionHandler = { [weak self] row, activationMode in
+            self?.activate(row: row, activationMode: activationMode)
         }
         tableView.hoverSelectionHandler = { [weak self] row in
             self?.selectHoveredRow(row)
@@ -297,7 +297,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
                 return true
             }
 
-            activateSelected(forcePlainText: Self.commandModifierIsActive())
+            activateSelected(activationMode: Self.activationMode())
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
@@ -447,7 +447,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
             return leaveFolderIfNeeded()
 
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            activateSelected(forcePlainText: Self.commandModifierIsActive(event: event))
+            activateSelected(activationMode: Self.activationMode(event: event))
             return true
 
         default:
@@ -512,16 +512,44 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            guard Self.commandModifierIsActive(event: event) else {
+            let activationMode = Self.activationMode(event: event)
+            guard activationMode != .standard else {
                 return false
             }
 
-            activateSelected(forcePlainText: true)
+            activateSelected(activationMode: activationMode)
             return true
 
         default:
             return false
         }
+    }
+
+    fileprivate static func activationMode(event: NSEvent? = nil) -> ClipboardPickerActivationMode {
+        ClipboardPickerActivationMode.fromModifiers(
+            command: commandModifierIsActive(event: event),
+            shift: shiftModifierIsActive(event: event)
+        )
+    }
+
+    fileprivate static func shiftModifierIsActive(event: NSEvent? = nil) -> Bool {
+        if event?.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.shift) == true {
+            return true
+        }
+
+        let appKitShiftIsDown = NSEvent.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.shift)
+        let coreGraphicsShiftIsDown = CGEventSource
+            .flagsState(.combinedSessionState)
+            .contains(.maskShift)
+        let physicalShiftIsDown =
+            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_Shift)) ||
+            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_RightShift))
+
+        return appKitShiftIsDown || coreGraphicsShiftIsDown || physicalShiftIsDown
     }
 
     fileprivate static func commandModifierIsActive(event: NSEvent? = nil) -> Bool {
@@ -580,8 +608,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
     }
 
-    private func activateSelected(forcePlainText: Bool) {
-        activate(row: selectedIndex, forcePlainText: forcePlainText)
+    private func activateSelected(activationMode: ClipboardPickerActivationMode) {
+        activate(row: selectedIndex, activationMode: activationMode)
     }
 
     private func enterSelectedFolderIfNeeded() -> Bool {
@@ -600,7 +628,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return true
     }
 
-    private func activate(row: Int, forcePlainText: Bool) {
+    private func activate(row: Int, activationMode: ClipboardPickerActivationMode) {
         guard entries.indices.contains(row), entries[row].isSelectable else {
             NSSound.beep()
             return
@@ -624,7 +652,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
         let handler = onSelect
         hide()
-        handler?(result, forcePlainText)
+        handler?(result, activationMode)
     }
 
     private func leaveFolderIfNeeded() -> Bool {
@@ -666,8 +694,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     }
 
     private func makeCell(for entry: ClipboardPickerEntry) -> NSView {
-        ClipboardPickerCellView(
-            title: entry.title,
+        let presentation = entry.presentation
+        return ClipboardPickerCellView(
+            title: presentation.title,
+            trailingLabel: presentation.trailingLineCountLabel,
             textColor: textColor(for: entry),
             icon: image(for: entry),
             showsDisclosure: showsDisclosure(for: entry),
@@ -755,6 +785,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
     }
 
     private let title: String
+    private let trailingLabel: String?
     private let textColor: NSColor
     private let font = NSFont.systemFont(ofSize: 13)
     private let iconView: NSImageView?
@@ -763,12 +794,14 @@ private final class ClipboardPickerCellView: NSTableCellView {
 
     init(
         title: String,
+        trailingLabel: String?,
         textColor: NSColor,
         icon: NSImage?,
         showsDisclosure: Bool,
         layoutWidthLimit: CGFloat
     ) {
         self.title = title
+        self.trailingLabel = trailingLabel
         self.textColor = textColor
         self.showsDisclosure = showsDisclosure
         self.layoutWidthLimit = layoutWidthLimit
@@ -843,17 +876,31 @@ private final class ClipboardPickerCellView: NSTableCellView {
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byClipping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle,
+        ]
+        if let trailingLabel {
+            let marker = trailingLabel as NSString
+            let markerWidth = ceil(marker.size(withAttributes: attributes).width)
+            let markerX = max(textStart, textEnd - markerWidth)
+            let markerRect = NSRect(
+                x: markerX,
+                y: textY,
+                width: markerWidth,
+                height: textHeight
+            )
+            marker.draw(at: markerRect.origin, withAttributes: attributes)
+            textEnd = markerRect.minX - Metrics.textSpacing
+        }
+
         let textRect = NSRect(
             x: textStart,
             y: textY,
             width: max(0, textEnd - textStart),
             height: textHeight
         )
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: textColor,
-            .paragraphStyle: paragraphStyle,
-        ]
         let renderedTitle = truncatedTitle(forWidth: textRect.width, attributes: attributes)
 
         NSGraphicsContext.saveGraphicsState()
@@ -966,7 +1013,7 @@ private final class ClipboardPickerClipView: NSClipView {
 @MainActor
 private final class ClipboardPickerTableView: NSTableView {
     var keyHandler: ((NSEvent) -> Bool)?
-    var mouseSelectionHandler: ((Int, Bool) -> Void)?
+    var mouseSelectionHandler: ((Int, ClipboardPickerActivationMode) -> Void)?
     var hoverSelectionHandler: ((Int) -> Void)?
     private var trackingArea: NSTrackingArea?
 
@@ -1002,12 +1049,12 @@ private final class ClipboardPickerTableView: NSTableView {
     override func mouseDown(with event: NSEvent) {
         let localPoint = convert(event.locationInWindow, from: nil)
         let clickedRow = row(at: localPoint)
-        let commandIsDown = ClipboardPickerPanelController.commandModifierIsActive(event: event)
+        let activationMode = ClipboardPickerPanelController.activationMode(event: event)
 
         super.mouseDown(with: event)
 
         if clickedRow >= 0 {
-            mouseSelectionHandler?(clickedRow, commandIsDown)
+            mouseSelectionHandler?(clickedRow, activationMode)
         }
     }
 

@@ -176,7 +176,7 @@ Shorty uses these hardcoded clipboard shortcuts:
 
 The clipboard menu shows the 20 most recent items directly, then up to 180 more items in 9 submenus of 20. Menu titles use the first line, preserve leading spaces, and are clipped to 60 characters.
 
-Hold `cmd` while selecting a clipboard history item, including pressing `return`, to paste its plain-text version without formatting.
+Hold `cmd` while selecting a clipboard history item, including pressing `return`, to paste its plain-text version without formatting. Hold `shift` to trim every line, discard empty lines, join the remaining lines with no separator, save that transformed text as the newest history item, and paste it. If both `cmd` and `shift` are held, the `shift` behavior is used.
 
 ### Window Switcher
 

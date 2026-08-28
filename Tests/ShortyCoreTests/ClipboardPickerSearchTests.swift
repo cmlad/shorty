@@ -103,6 +103,91 @@ final class ClipboardPickerSearchTests: XCTestCase {
         XCTAssertEqual(entries[1].title, longText)
     }
 
+    func testHistoryPresentationSeparatesLineCountMarker() throws {
+        let item = ClipboardItem(plainText: "First line\nSecond line\nThird line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "First line")
+        XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
+        XCTAssertEqual(entries[1].title, "First line")
+    }
+
+    func testHistoryPresentationOmitsLineCountMarkerForSingleLineItems() throws {
+        let item = ClipboardItem(plainText: "Only line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "Only line")
+        XCTAssertNil(presentation.trailingLineCountLabel)
+    }
+
+    func testHistoryPresentationUsesFirstNonBlankLineAndCountsFollowingLines() throws {
+        let item = ClipboardItem(plainText: "\n\n  First content line\nSecond line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "  First content line")
+        XCTAssertEqual(presentation.trailingLineCountLabel, "+1")
+    }
+
+    func testHistoryPresentationCountsCRLFAsSingleLineBreak() throws {
+        let item = ClipboardItem(plainText: "First line\r\nSecond line\r\nThird line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "First line")
+        XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
+    }
+
+    func testActivationModeUsesCommandForPlainText() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: true, shift: false),
+            .plainText
+        )
+    }
+
+    func testActivationModeUsesStandardWithoutModifiers() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: false, shift: false),
+            .standard
+        )
+    }
+
+    func testActivationModeUsesShiftForJoinedLines() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: false, shift: true),
+            .joinedLines
+        )
+    }
+
+    func testActivationModeGivesShiftPrecedenceOverCommand() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: true, shift: true),
+            .joinedLines
+        )
+    }
+
     func testFolderSearchOnlyFiltersFolderEntries() throws {
         let folder = ClipboardPickerFolder(
             id: "snippets:Work",
