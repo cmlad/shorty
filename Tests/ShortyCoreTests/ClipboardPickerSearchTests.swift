@@ -103,6 +103,49 @@ final class ClipboardPickerSearchTests: XCTestCase {
         XCTAssertEqual(entries[1].title, longText)
     }
 
+    func testHistoryPresentationSeparatesLineCountMarker() throws {
+        let item = ClipboardItem(plainText: "First line\nSecond line\nThird line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "First line")
+        XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
+        XCTAssertEqual(entries[1].title, "First line")
+    }
+
+    func testHistoryPresentationOmitsLineCountMarkerForSingleLineItems() throws {
+        let item = ClipboardItem(plainText: "Only line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "Only line")
+        XCTAssertNil(presentation.trailingLineCountLabel)
+    }
+
+    func testHistoryPresentationUsesFirstNonBlankLineAndCountsFollowingLines() throws {
+        let item = ClipboardItem(plainText: "\n\n  First content line\nSecond line")
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [item],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+        let presentation = entries[1].presentation
+
+        XCTAssertEqual(presentation.title, "  First content line")
+        XCTAssertEqual(presentation.trailingLineCountLabel, "+1")
+    }
+
     func testFolderSearchOnlyFiltersFolderEntries() throws {
         let folder = ClipboardPickerFolder(
             id: "snippets:Work",

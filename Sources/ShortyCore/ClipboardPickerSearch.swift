@@ -24,6 +24,16 @@ public struct ClipboardPickerFolder: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct ClipboardPickerEntryPresentation: Equatable, Sendable {
+    public let title: String
+    public let trailingLineCountLabel: String?
+
+    public init(title: String, trailingLineCountLabel: String? = nil) {
+        self.title = title
+        self.trailingLineCountLabel = trailingLineCountLabel
+    }
+}
+
 public indirect enum ClipboardPickerEntry: Equatable, Identifiable, Sendable {
     case header(String)
     case folder(ClipboardPickerFolder)
@@ -50,15 +60,23 @@ public indirect enum ClipboardPickerEntry: Equatable, Identifiable, Sendable {
     }
 
     public var title: String {
+        presentation.title
+    }
+
+    public var presentation: ClipboardPickerEntryPresentation {
         switch self {
         case let .header(title), let .back(title), let .empty(title):
-            return title
+            return ClipboardPickerEntryPresentation(title: title)
         case let .folder(folder):
-            return folder.title
+            return ClipboardPickerEntryPresentation(title: folder.title)
         case let .history(item):
-            return item.menuTitle(maxLength: ClipboardConstants.maxPickerItemTitleLength)
+            let preview = item.pickerLinePreview()
+            return ClipboardPickerEntryPresentation(
+                title: preview.title,
+                trailingLineCountLabel: preview.trailingLineCountLabel
+            )
         case let .snippet(_, snippet):
-            return snippet.title
+            return ClipboardPickerEntryPresentation(title: snippet.title)
         }
     }
 

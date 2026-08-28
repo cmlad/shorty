@@ -388,10 +388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mode: mode,
             history: controller.recentClipboardItems(),
             snippetGroups: controller.currentSnippetGroups(),
-            onSelect: { [weak self] result, forcePlainText in
+            onSelect: { [weak self] result, activationMode in
                 self?.pastePickerResult(
                     result,
-                    forcePlainText: forcePlainText,
+                    activationMode: activationMode,
                     targetApplication: targetApplication
                 )
             },
@@ -403,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func pastePickerResult(
         _ result: ClipboardPickerResult,
-        forcePlainText: Bool,
+        activationMode: ClipboardPickerActivationMode,
         targetApplication: NSRunningApplication?
     ) {
         Self.reactivate(targetApplication)
@@ -415,9 +415,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             switch result {
             case let .history(item):
-                if forcePlainText {
+                switch activationMode {
+                case .joinedLines:
+                    controller.pasteClipboardItemByJoiningTrimmedNonEmptyLines(item)
+                case .plainText:
                     controller.pasteClipboardItemAsPlainText(item)
-                } else {
+                case .standard:
                     controller.pasteClipboardItem(item)
                 }
             case let .snippet(_, snippet):
