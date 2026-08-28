@@ -369,7 +369,7 @@ public final class ClipboardHistoryStore {
     @discardableResult
     public func addJoinedTrimmedNonEmptyLines(from item: ClipboardItem) -> String {
         let text = item.joinedTrimmedNonEmptyLines
-        addPlainText(text)
+        add(ClipboardItem(plainText: text))
         return text
     }
 

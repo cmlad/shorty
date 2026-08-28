@@ -88,6 +88,25 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertEqual(items[1].additionalRepresentations, richOriginal.additionalRepresentations)
     }
 
+    func testStoreAddsEmptyJoinedTrimmedTextAsPlainNewestItem() throws {
+        let store = ClipboardHistoryStore(url: try temporaryHistoryURL(), maxStoredItems: 2)
+        let richOriginal = ClipboardItem(
+            plainText: " \n\t\r\n ",
+            rtfData: try makeRTFData(" \n\t\r\n ")
+        )
+
+        store.add(richOriginal)
+        let transformedText = store.addJoinedTrimmedNonEmptyLines(from: richOriginal)
+        let items = store.recentItems()
+
+        XCTAssertEqual(transformedText, "")
+        XCTAssertEqual(items.map(\.plainText), ["", richOriginal.plainText])
+        XCTAssertNil(items[0].rtfData)
+        XCTAssertNil(items[0].rtfdData)
+        XCTAssertEqual(items[0].additionalRepresentations, [])
+        XCTAssertEqual(items[1].id, richOriginal.id)
+    }
+
     func testCopyJoinedTrimmedTextToPasteboardOmitsRichRepresentations() throws {
         let pasteboard = uniquePasteboard()
         let notesType = NSPasteboard.PasteboardType("com.apple.notes.richtext")
